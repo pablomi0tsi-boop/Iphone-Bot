@@ -1,6 +1,6 @@
 {
   "discord": {
-    "webhook_url": "",
+    "webhook_url": "https://discord.com/api/webhooks/1528370270740680787/ZHX2BIyK_-IWiJGtyGAWSOp5F1fTRsFH_KyuV2ncIqc-1MRMP1Q_YgHN4fJvNV3cXoGC",
     "username": "iPhone Deal Bot",
     "rate_limit_seconds": 0.5
   },
