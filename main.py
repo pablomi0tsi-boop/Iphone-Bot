@@ -7,13 +7,12 @@ description), matches it against the user's expected **resale price list** in
 
     profit = resale_price - listing_price
 
-exceeds ``min_profit`` (default: 1 PLN).
+is at least ``minimum_profit`` (default: 300 PLN).
 
-Listings are ignored when:
-
-* they contain any blacklisted keyword (iCloud lock, damage, "for parts", ...),
-* the model or storage capacity cannot be determined confidently, or
-* no resale price is configured for the detected model + storage.
+Listings are ignored when they contain a blacklisted/accessory keyword, have no
+price or a price of ``0``, have no photos, come from a business seller, or when
+the model/storage cannot be determined confidently (or has no configured resale
+price).
 
 Run it with::
 
@@ -112,8 +111,27 @@ def load_config(path: str | Path) -> AppConfig:
     if not config_path.is_file():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    with config_path.open("r", encoding="utf-8") as handle:
-        raw = json.load(handle)
+    try:
+        with config_path.open("r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"config.json is not valid JSON: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise ValueError("config.json must contain a JSON object at the top level")
+
+    def _number(container: Dict[str, Any], key: str, default: float, *,
+                minimum: Optional[float] = None,
+                allow_zero: bool = True) -> float:
+        """Parse a numeric config value with a clear, field-specific error."""
+        try:
+            value = float(container.get(key, default))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"'{key}' must be a number (got {container.get(key)!r})") from exc
+        if minimum is not None and value < minimum:
+            raise ValueError(f"'{key}' must be >= {minimum} (got {value})")
+        if not allow_zero and value == 0:
+            raise ValueError(f"'{key}' must not be 0")
+        return value
 
     olx = raw.get("olx", {})
     discord_cfg = raw.get("discord", {})
@@ -136,7 +154,9 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig(
         webhook_url=discord_cfg.get("webhook_url", ""),
         discord_username=discord_cfg.get("username", "Phone Deal Bot"),
-        discord_rate_limit_seconds=float(discord_cfg.get("rate_limit_seconds", 0.5)),
+        discord_rate_limit_seconds=_number(
+            discord_cfg, "rate_limit_seconds", 0.5, minimum=0
+        ),
         olx_base_url=olx.get("base_url", "https://www.olx.pl/api/v1/offers/"),
         olx_user_agent=olx.get(
             "user_agent", "Mozilla/5.0 (compatible; PhoneDealBot/1.0)"
@@ -145,16 +165,22 @@ def load_config(path: str | Path) -> AppConfig:
         olx_sort_by=(olx.get("sort_by") or None),
         olx_include_promoted=bool(olx.get("include_promoted", False)),
         olx_extra_params=dict(olx.get("extra_params", {})),
-        poll_interval_seconds=float(olx.get("poll_interval_seconds", 10)),
-        jitter_seconds=float(olx.get("jitter_seconds", 2)),
-        max_backoff_seconds=float(olx.get("max_backoff_seconds", 300)),
-        request_timeout_seconds=float(olx.get("request_timeout_seconds", 15)),
-        results_per_query=int(olx.get("results_per_query", 40)),
-        pages_per_poll=max(1, int(olx.get("pages_per_poll", 1))),
+        poll_interval_seconds=_number(olx, "poll_interval_seconds", 10, minimum=1),
+        jitter_seconds=_number(olx, "jitter_seconds", 2, minimum=0),
+        max_backoff_seconds=_number(olx, "max_backoff_seconds", 300, minimum=1),
+        request_timeout_seconds=_number(
+            olx, "request_timeout_seconds", 15, minimum=1
+        ),
+        results_per_query=max(1, int(_number(olx, "results_per_query", 40, minimum=1))),
+        pages_per_poll=max(1, int(_number(olx, "pages_per_poll", 1, minimum=1))),
         search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
-        minimum_profit=float(raw.get("minimum_profit", raw.get("min_profit", 300))),
-        stats_interval_seconds=float(raw.get("stats_interval_seconds", 600)),
+        minimum_profit=_number(
+            raw, "minimum_profit", float(raw.get("min_profit", 300))
+        ),
+        stats_interval_seconds=_number(
+            raw, "stats_interval_seconds", 600, minimum=0
+        ),
         blacklist_keywords=[
             str(k).lower() for k in raw.get("blacklist_keywords", [])
         ],
@@ -201,7 +227,7 @@ class DealMonitor:
         """Evaluate a listing; return a :data:`DealItem` if it is a deal.
 
         Returns ``None`` (and the caller records it as seen) when the listing is
-        filtered out.         A listing is ignored when it:
+        filtered out. A listing is ignored when it:
 
         * contains a blacklisted or accessory keyword (swap terms, ``etui``,
           ``bateria``, ``airpods``, ...),
@@ -245,6 +271,13 @@ class DealMonitor:
     # -- lifecycle ---------------------------------------------------------- #
     async def run(self) -> None:
         """Run the monitor until a stop is requested."""
+        logger.info(
+            "Starting OLX iPhone deal monitor | minimum_profit=%.2f PLN | "
+            "webhook=%s | db=%s",
+            self._config.minimum_profit,
+            "configured" if self._config.webhook_url else "dry-run",
+            self._config.database_path,
+        )
         await self._db.connect()
 
         # Only prime (silently record the back-catalogue) on a genuinely fresh
@@ -308,12 +341,21 @@ class DealMonitor:
                 for task in loops:
                     task.cancel()
                 await asyncio.gather(*loops, return_exceptions=True)
-                await self._queue.join()
+                # Drain queued notifications, but never let a slow/unreachable
+                # Discord hang shutdown indefinitely.
+                try:
+                    await asyncio.wait_for(self._queue.join(), timeout=15)
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Timed out draining %d pending notification(s) on shutdown",
+                        self._queue.qsize(),
+                    )
                 worker.cancel()
                 stats_task.cancel()
                 await asyncio.gather(worker, stats_task, return_exceptions=True)
                 self._log_stats()  # final summary on shutdown
                 await self._db.close()
+                logger.info("Shutdown complete.")
 
     async def _run_query_loop(
         self, query: str, olx_client: OlxClient, *, primed: bool
@@ -321,6 +363,7 @@ class DealMonitor:
         """Independently poll a single query forever with jitter + back-off."""
         base = self._config.poll_interval_seconds
         backoff = 0.0
+        consecutive_failures = 0
         local_primed = primed
 
         while not self._stop_event.is_set():
@@ -338,16 +381,28 @@ class DealMonitor:
                     logger.info(
                         "[%s] priming complete; new listings will now notify", query
                     )
+                if consecutive_failures:
+                    logger.info(
+                        "[%s] recovered after %d failed poll(s)",
+                        query,
+                        consecutive_failures,
+                    )
+                consecutive_failures = 0
                 backoff = 0.0
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                consecutive_failures += 1
                 backoff = min(
                     base if backoff == 0 else backoff * 2,
                     self._config.max_backoff_seconds,
                 )
                 logger.warning(
-                    "[%s] poll failed: %s (backing off %.0fs)", query, exc, backoff
+                    "[%s] poll failed (attempt %d): %s (retrying in %.0fs)",
+                    query,
+                    consecutive_failures,
+                    exc,
+                    backoff,
                 )
 
             delay = (backoff if backoff else base) + random.uniform(

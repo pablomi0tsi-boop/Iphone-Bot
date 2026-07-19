@@ -142,9 +142,22 @@ python main.py                # uses ./config.json
 python main.py path/to.json   # custom config
 ```
 
+## Resilience
+
+- **Config** is validated on load: invalid JSON and out-of-range numeric fields
+  raise a clear error and the process exits cleanly.
+- **SQLite** is created automatically (including parent directories); a corrupt
+  database file is quarantined (`*.corrupt-<timestamp>`) and recreated.
+- **Discord** failures/timeouts are retried; an empty `webhook_url` runs in
+  dry-run (logged, never crashes).
+- **OLX** transient errors/timeouts trigger per-query exponential back-off.
+- **Ctrl+C / SIGTERM** stops cleanly: background tasks are cancelled, queued
+  notifications are drained (capped), and the HTTP session is closed.
+
 ## Test
 
 ```bash
-python tests/test_pricing.py  # parser + PriceBook units
-python tests/test_e2e.py      # full pipeline; no network/secrets required
+python tests/test_pricing.py    # parser + PriceBook units
+python tests/test_e2e.py        # full pipeline; no network/secrets required
+python tests/test_stability.py  # DB/corruption, config validation, timeouts
 ```
