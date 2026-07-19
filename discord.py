@@ -209,9 +209,11 @@ class DiscordNotifier:
                             await asyncio.sleep(retry_after)
                             continue
                         response.raise_for_status()
-                        self._last_sent_at = asyncio.get_event_loop().time()
+                        self._last_sent_at = asyncio.get_running_loop().time()
                         return True
-                except aiohttp.ClientError as exc:
+                except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+                    # aiohttp raises asyncio.TimeoutError (not ClientError) when
+                    # a request exceeds its timeout, so both must be handled.
                     logger.warning(
                         "Discord webhook post failed (attempt %d/3): %s",
                         attempt + 1,
@@ -225,7 +227,7 @@ class DiscordNotifier:
         """Sleep just long enough to honour ``rate_limit_seconds``."""
         if self._rate_limit_seconds <= 0:
             return
-        now = asyncio.get_event_loop().time()
+        now = asyncio.get_running_loop().time()
         elapsed = now - self._last_sent_at
         if elapsed < self._rate_limit_seconds:
             await asyncio.sleep(self._rate_limit_seconds - elapsed)

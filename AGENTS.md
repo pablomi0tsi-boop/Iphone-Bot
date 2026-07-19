@@ -27,8 +27,22 @@ Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
 - End-to-end: `python tests/test_e2e.py`. It starts a local aiohttp server that
   fakes BOTH the OLX API and the Discord webhook, so it needs no network or
   secrets and is the fastest way to validate the full pipeline.
+- Stability: `python tests/test_stability.py` (DB auto-create/corruption
+  recovery, config validation, empty-webhook dry-run, Discord timeout retry).
 - There is no separate lint config; `python -m py_compile *.py` is a quick
   syntax check.
+
+### Resilience behaviours (don't "simplify" these away)
+- `ListingDatabase.connect` creates parent dirs and, if the DB file is corrupt,
+  quarantines it to `*.corrupt-<ts>` and recreates a fresh one (self-heal).
+- `load_config` validates numeric fields (raises `ValueError` with the field
+  name) and reports invalid JSON clearly; `main()` exits cleanly on config
+  errors.
+- Discord `_post` retries on both `aiohttp.ClientError` and
+  `asyncio.TimeoutError`; OLX poll failures back off exponentially per query.
+- Shutdown drains the notification queue with a 15s cap so a slow Discord can't
+  hang exit; all background tasks are cancelled and the aiohttp session closes
+  via `async with`.
 
 ### Gotchas
 - `discord.py` here is a **local module** (webhook sender), not the third-party

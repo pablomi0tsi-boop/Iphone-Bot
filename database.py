@@ -10,10 +10,15 @@ with the asyncio event loop that drives the rest of the application.
 
 from __future__ import annotations
 
+import logging
+import os
+import sqlite3
 import time
 from typing import Iterable, Optional, Sequence, Set, Tuple
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
 
 # A row queued for bulk insertion:
 #   (listing_id, source, title, price, url, notified)
@@ -48,12 +53,50 @@ class ListingDatabase:
     async def connect(self) -> None:
         """Open the connection and ensure the schema exists.
 
-        Safe to call once during application start-up. Enables WAL mode so that
-        reads and writes do not block each other during long polling loops.
+        Safe to call once during application start-up. The parent directory is
+        created automatically, and if the database file is found to be corrupt it
+        is quarantined and recreated so the monitor self-heals instead of
+        crash-looping. Enables WAL mode so reads and writes do not block each
+        other during long polling loops.
         """
+        self._ensure_parent_dir()
+        try:
+            await self._open_and_init()
+        except (sqlite3.DatabaseError, aiosqlite.Error) as exc:
+            # An unreadable/corrupt on-disk database: quarantine and recreate
+            # once. In-memory databases cannot be corrupt, so re-raise those.
+            if self._path == ":memory:":
+                raise
+            logger.error(
+                "Database at %s is unusable (%s); quarantining and recreating",
+                self._path,
+                exc,
+            )
+            await self._safe_close()
+            self._quarantine_corrupt_files()
+            await self._open_and_init()
+        logger.info("Connected to SQLite database at %s", self._path)
+
+    def _ensure_parent_dir(self) -> None:
+        """Create the database's parent directory when it does not exist."""
+        if self._path == ":memory:":
+            return
+        parent = os.path.dirname(os.path.abspath(self._path))
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+
+    async def _open_and_init(self) -> None:
+        """Open the connection, verify integrity and create the schema."""
         self._db = await aiosqlite.connect(self._path)
         self._db.row_factory = aiosqlite.Row
         await self._db.execute("PRAGMA journal_mode=WAL;")
+        # Cheap integrity probe (the table is tiny); surfaces a corrupt file so
+        # connect() can quarantine it rather than failing later mid-poll.
+        if self._path != ":memory:":
+            async with self._db.execute("PRAGMA quick_check;") as cursor:
+                row = await cursor.fetchone()
+            if row is not None and str(row[0]).lower() != "ok":
+                raise sqlite3.DatabaseError(f"integrity check failed: {row[0]}")
         await self._db.execute(
             """
             CREATE TABLE IF NOT EXISTS seen_listings (
@@ -69,11 +112,31 @@ class ListingDatabase:
         )
         await self._db.commit()
 
+    def _quarantine_corrupt_files(self) -> None:
+        """Rename the corrupt database (and WAL/SHM sidecars) out of the way."""
+        stamp = time.strftime("%Y%m%d-%H%M%S")
+        for suffix in ("", "-wal", "-shm"):
+            path = self._path + suffix
+            if os.path.exists(path):
+                target = f"{path}.corrupt-{stamp}"
+                try:
+                    os.replace(path, target)
+                    logger.warning("Moved corrupt database file %s -> %s", path, target)
+                except OSError as exc:  # pragma: no cover - best effort
+                    logger.error("Could not quarantine %s: %s", path, exc)
+
+    async def _safe_close(self) -> None:
+        """Close the connection, ignoring any error from a broken handle."""
+        if self._db is not None:
+            try:
+                await self._db.close()
+            except (sqlite3.Error, aiosqlite.Error):  # pragma: no cover
+                pass
+            self._db = None
+
     async def close(self) -> None:
         """Close the underlying connection if it is open."""
-        if self._db is not None:
-            await self._db.close()
-            self._db = None
+        await self._safe_close()
 
     def _require_db(self) -> aiosqlite.Connection:
         """Return the live connection or raise if :meth:`connect` was skipped."""
