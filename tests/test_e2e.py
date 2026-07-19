@@ -149,6 +149,8 @@ PROMOTED_INDICES = [5]
 class FakeServer:
     def __init__(self) -> None:
         self.webhook_payloads: list[dict] = []
+        self.offers: list[dict] = list(FAKE_OFFERS)
+        self.last_offer_params: dict | None = None
         self._runner: web.AppRunner | None = None
         self.base_url = ""
 
@@ -168,12 +170,20 @@ class FakeServer:
             await self._runner.cleanup()
 
     async def _offers(self, request: web.Request) -> web.Response:
+        self.last_offer_params = dict(request.query)
         query = request.query.get("query", "").lower()
         offset = int(request.query.get("offset", "0"))
         if "iphone" not in query or offset > 0:
             return web.json_response({"data": [], "metadata": {"promoted": []}})
         return web.json_response(
-            {"data": FAKE_OFFERS, "metadata": {"promoted": PROMOTED_INDICES}}
+            {
+                "data": sorted(
+                    self.offers,
+                    key=lambda o: o.get("created_time") or "",
+                    reverse=True,
+                ),
+                "metadata": {"promoted": PROMOTED_INDICES},
+            }
         )
 
     async def _webhook(self, request: web.Request) -> web.Response:
@@ -189,7 +199,7 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         olx_base_url=f"{server.base_url}/api/v1/offers/",
         olx_user_agent="test-agent",
         olx_region_id=None,
-        olx_sort_by=None,
+        olx_sort_by="created_at:desc",
         olx_include_promoted=False,
         olx_extra_params={},
         poll_interval_seconds=0.1,
@@ -198,6 +208,7 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         request_timeout_seconds=5.0,
         results_per_query=40,
         pages_per_poll=1,
+        prime_pages_per_query=1,
         search_queries=["iphone 13"],
         database_path=":memory:",
         minimum_profit=300.0,
@@ -220,11 +231,19 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
 
 
 async def _run_cycles(
-    monitor: DealMonitor, cycles: int, *, priming_first_cycle: bool
+    monitor: DealMonitor,
+    cycles: int,
+    *,
+    priming_first_cycle: bool,
+    between_cycles=None,
 ) -> None:
     await monitor._db.connect()
     async with aiohttp.ClientSession() as session:
-        olx = OlxClient(session, base_url=monitor._config.olx_base_url)
+        olx = OlxClient(
+            session,
+            base_url=monitor._config.olx_base_url,
+            sort_by=monitor._config.olx_sort_by,
+        )
         notifier = DiscordNotifier(
             session,
             webhook_url=monitor._config.webhook_url,
@@ -234,9 +253,16 @@ async def _run_cycles(
         worker = asyncio.create_task(monitor._notifier_worker(notifier))
         try:
             for cycle in range(cycles):
+                if between_cycles is not None and cycle > 0:
+                    await between_cycles(cycle)
                 priming = priming_first_cycle and cycle == 0
                 for query in monitor._config.search_queries:
-                    listings = await olx.search(query)
+                    pages = (
+                        monitor._config.prime_pages_per_query
+                        if priming
+                        else monitor._config.pages_per_poll
+                    )
+                    listings = await olx.search(query, pages=pages)
                     await monitor._process_listings(query, listings, priming=priming)
                 await monitor._queue.join()
         finally:
@@ -373,9 +399,46 @@ async def test_priming_suppresses_first_cycle() -> None:
     await server.start()
     try:
         monitor = DealMonitor(_build_config(server, prime=True))
-        await _run_cycles(monitor, cycles=1, priming_first_cycle=True)
+        # Cycle 0 primes; cycle 1 sees the same catalogue — still no notify.
+        await _run_cycles(monitor, cycles=2, priming_first_cycle=True)
         assert server.webhook_payloads == [], server.webhook_payloads
-        print("PASS: priming suppresses notifications on the first cycle")
+        assert server.last_offer_params is not None
+        assert server.last_offer_params.get("sort_by") == "created_at:desc"
+        print("PASS: priming suppresses notifications on first + later cycles")
+    finally:
+        await server.stop()
+
+
+async def test_only_post_prime_new_listings_notify() -> None:
+    """After priming, only a listing that appears in a later poll notifies."""
+    server = FakeServer()
+    await server.start()
+    try:
+        monitor = DealMonitor(_build_config(server, prime=True))
+
+        async def _inject_new(_cycle: int) -> None:
+            server.offers = list(server.offers) + [
+                _offer(
+                    2099,
+                    "iPhone 13 128GB brand new after prime",
+                    1000,
+                    model_label="iPhone 13",
+                    storage_label="128GB",
+                    photos=3,
+                    seller="Anna",
+                )
+            ]
+
+        await _run_cycles(
+            monitor,
+            cycles=2,
+            priming_first_cycle=True,
+            between_cycles=_inject_new,
+        )
+        assert len(server.webhook_payloads) == 1, server.webhook_payloads
+        embed = server.webhook_payloads[0]["embeds"][0]
+        assert "brand new after prime" in (embed.get("description") or "")
+        print("PASS: only listings first seen after priming notify")
     finally:
         await server.stop()
 
@@ -384,6 +447,7 @@ async def _main() -> None:
     await test_blacklist_and_unknowns_are_ignored()
     await test_full_matching_pipeline()
     await test_priming_suppresses_first_cycle()
+    await test_only_post_prime_new_listings_notify()
     print("\nALL TESTS PASSED")
 
 

@@ -125,6 +125,7 @@ class AppConfig:
     request_timeout_seconds: float
     results_per_query: int
     pages_per_poll: int
+    prime_pages_per_query: int
     search_queries: List[str]
     database_path: str
     minimum_profit: float
@@ -216,7 +217,8 @@ def load_config(path: str | Path) -> AppConfig:
             "user_agent", "Mozilla/5.0 (compatible; PhoneDealBot/1.0)"
         ),
         olx_region_id=olx.get("region_id"),
-        olx_sort_by=(olx.get("sort_by") or None),
+        # Request newest-first; OLX may ignore this (see OlxClient sort check).
+        olx_sort_by=(olx.get("sort_by") or "created_at:desc"),
         olx_include_promoted=bool(olx.get("include_promoted", False)),
         olx_extra_params=dict(olx.get("extra_params", {})),
         poll_interval_seconds=_number(olx, "poll_interval_seconds", 10, minimum=1),
@@ -227,6 +229,17 @@ def load_config(path: str | Path) -> AppConfig:
         ),
         results_per_query=max(1, int(_number(olx, "results_per_query", 40, minimum=1))),
         pages_per_poll=max(1, int(_number(olx, "pages_per_poll", 1, minimum=1))),
+        prime_pages_per_query=max(
+            1,
+            int(
+                _number(
+                    olx,
+                    "prime_pages_per_query",
+                    max(5, float(olx.get("pages_per_poll", 1) or 1)),
+                    minimum=1,
+                )
+            ),
+        ),
         search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
         minimum_profit=_number(
@@ -485,11 +498,19 @@ class DealMonitor:
             )
         await self._db.connect()
 
-        # Only prime (silently record the back-catalogue) on a genuinely fresh
-        # database. On restart the DB already has history, so newly-appeared
-        # listings should notify immediately rather than being suppressed.
-        existing = await self._db.count()
-        start_primed = existing > 0 or not self._config.prime_on_start
+        # Always run a silent prime pass on startup when configured — even if
+        # the DB already has rows from a previous run. Every listing currently
+        # returned by OLX is recorded as seen so it can never notify later
+        # (the age threshold alone is not enough for listings that were already
+        # live before this process started).
+        start_primed = not self._config.prime_on_start
+        if not start_primed:
+            logger.info(
+                "Startup priming enabled: first poll per query will record all "
+                "current listings without notifying"
+            )
+        else:
+            logger.info("Startup priming disabled (prime_on_start=false)")
 
         connector = aiohttp.TCPConnector(
             limit=20,
@@ -522,11 +543,12 @@ class DealMonitor:
                 )
 
             logger.info(
-                "Monitoring %d query(ies), %d resale price point(s) on %s | base "
-                "interval %.0fs (+<=%.0fs jitter)%s",
+                "Monitoring %d query(ies), %d resale price point(s) on %s | "
+                "sort_by=%s | base interval %.0fs (+<=%.0fs jitter)%s",
                 len(self._config.search_queries),
                 len(self._config.price_book),
                 self._config.olx_base_url,
+                self._config.olx_sort_by,
                 self._config.poll_interval_seconds,
                 self._config.jitter_seconds,
                 "" if start_primed else " | priming first cycle",
@@ -573,10 +595,17 @@ class DealMonitor:
 
         while not self._stop_event.is_set():
             try:
+                # Wider coverage while priming so more of the live catalogue is
+                # recorded before notifications start.
+                pages = (
+                    self._config.prime_pages_per_query
+                    if not local_primed
+                    else self._config.pages_per_poll
+                )
                 listings = await olx_client.search(
                     query,
                     limit=self._config.results_per_query,
-                    pages=self._config.pages_per_poll,
+                    pages=pages,
                 )
                 await self._process_listings(
                     query, listings, priming=not local_primed
@@ -584,7 +613,9 @@ class DealMonitor:
                 if not local_primed:
                     local_primed = True
                     logger.info(
-                        "[%s] priming complete; new listings will now notify", query
+                        "[%s] priming complete; notifying only listings not seen "
+                        "in previous poll cycles",
+                        query,
                     )
                 if consecutive_failures:
                     logger.info(
@@ -618,7 +649,13 @@ class DealMonitor:
     async def _process_listings(
         self, query: str, listings: List[Listing], *, priming: bool
     ) -> None:
-        """Match, cost and enqueue new listings for a single poll result."""
+        """Match, cost and enqueue new listings for a single poll result.
+
+        Only listings whose ids were **not** already in the DB (i.e. not seen
+        during startup priming or any earlier poll) are considered. During
+        priming every new id is recorded with ``notified=False`` and no Discord
+        message is sent.
+        """
         if not listings:
             return
 
@@ -626,15 +663,43 @@ class DealMonitor:
         already_seen = await self._db.seen_subset(ids)
         new_listings = [listing for listing in listings if listing.id not in already_seen]
         if not new_listings:
+            logger.debug(
+                "[%s] %d listing(s) fetched, 0 new since previous cycle",
+                query,
+                len(listings),
+            )
             return
 
         self._stats.listings_checked += len(new_listings)
+
+        # Startup / configured priming: record the live catalogue, never notify.
+        if priming:
+            records = [
+                (
+                    listing.id,
+                    listing.source,
+                    listing.title,
+                    listing.price,
+                    listing.url,
+                    False,
+                )
+                for listing in new_listings
+            ]
+            await self._db.mark_seen_many(records)
+            logger.info(
+                "[%s] primed %d listing(s) into DB (%d already known) — "
+                "no notifications",
+                query,
+                len(new_listings),
+                len(already_seen),
+            )
+            return
 
         records = []
         deals: List[DealItem] = []
         for listing in new_listings:
             deal = self.evaluate(listing)
-            notified = deal is not None and not priming
+            notified = deal is not None
             if notified:
                 assert deal is not None
                 self._stats.deals_found += 1
@@ -665,11 +730,10 @@ class DealMonitor:
             await self._queue.put(deal)
 
         logger.info(
-            "[%s] %d new listing(s), %d deal(s)%s",
+            "[%s] %d new listing(s) since previous cycle, %d deal(s)",
             query,
             len(new_listings),
             len(deals),
-            " (priming - not notified)" if priming else "",
         )
 
     async def _notifier_worker(self, notifier: DiscordNotifier) -> None:

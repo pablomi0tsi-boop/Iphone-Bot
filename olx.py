@@ -17,11 +17,13 @@ against the live API):
   ``metadata.promoted``; this client drops them by default so the monitor only
   reacts to genuine organic listings and does not waste its page budget on the
   same recycled shop ads.
-* **``sort_by=created_at`` is NOT honoured.** The endpoint accepts
-  ``sort_by=filter_float_price:asc|desc`` (verified working) but silently ignores
-  ``created_at`` ordering and can even surface very old listings first. Because
-  there is no reliable "newest first" ordering, detection relies on de-duplicating
-  every organic result against the local database rather than trusting order.
+* **``sort_by=created_at`` is NOT reliably honoured.** The client still requests
+  ``created_at:desc`` (newest first) and logs a one-shot check of whether the
+  first page is actually chronological. Empirically the endpoint often ignores
+  ``created_at`` ordering and only ``filter_float_price:asc|desc`` sorts. Because
+  there is no reliable "newest first" ordering, detection relies on
+  de-duplicating every organic result against the local database rather than
+  trusting order.
 
 This client therefore raises on transport/HTTP errors so the caller can apply
 back-off; only per-offer parsing errors are swallowed.
@@ -31,6 +33,7 @@ from __future__ import annotations
 
 import logging
 import re
+from datetime import datetime
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -106,10 +109,11 @@ class OlxClient:
             rejects requests without a browser-like UA.
         :param request_timeout: Per-request timeout in seconds.
         :param region_id: Optional OLX region id to narrow the search.
-        :param sort_by: Optional OLX sort key. Only price sorting is honoured by
-            the API (``filter_float_price:asc`` / ``filter_float_price:desc``);
-            ``created_at`` ordering is ignored server-side. Leave ``None`` to use
-            OLX's default ordering, which surfaces fresh listings best.
+        :param sort_by: Optional OLX sort key. Requests
+            ``created_at:desc`` by default (newest first). Empirically the API
+            often **ignores** chronological sort and only honours price sorting
+            (``filter_float_price:asc|desc``); the monitor therefore still
+            depends on SQLite de-duplication to detect truly new listings.
         :param include_promoted: When ``False`` (default) paid/promoted ads
             reported in ``metadata.promoted`` are filtered out.
         :param extra_params: Optional extra query parameters merged into every
@@ -119,13 +123,14 @@ class OlxClient:
         self._base_url = base_url
         self._request_timeout = request_timeout
         self._region_id = region_id
-        self._sort_by = sort_by or None
+        self._sort_by = sort_by or "created_at:desc"
         self._include_promoted = include_promoted
         self._extra_params = dict(extra_params or {})
         self._headers = {
             "User-Agent": user_agent,
             "Accept": "application/json",
         }
+        self._logged_sort_check = False
 
     async def search(
         self, query: str, *, limit: int = 40, pages: int = 1
@@ -178,8 +183,8 @@ class OlxClient:
         :raises aiohttp.ClientError: on any transport/HTTP failure.
         """
         params: Dict[str, Any] = {"query": query, "limit": limit, "offset": offset}
-        if self._sort_by is not None:
-            params["sort_by"] = self._sort_by
+        # Always send an explicit sort — newest-first is the intended order.
+        params["sort_by"] = self._sort_by
         if self._region_id is not None:
             params["region_id"] = self._region_id
         params.update(self._extra_params)
@@ -200,7 +205,53 @@ class OlxClient:
         metadata = payload.get("metadata") or {}
         promoted_raw = metadata.get("promoted") or []
         promoted = {int(i) for i in promoted_raw if isinstance(i, (int, float))}
+        if offset == 0:
+            self._verify_newest_first(query, offers)
         return offers, promoted
+
+    def _verify_newest_first(self, query: str, offers: List[Dict[str, Any]]) -> None:
+        """Log whether the first page looks newest-first for ``sort_by``.
+
+        OLX frequently ignores ``created_at:*``; this check surfaces that so
+        operators know detection must rely on DB de-duplication.
+        """
+        times: List[datetime] = []
+        for offer in offers:
+            raw = offer.get("created_time")
+            if not raw:
+                continue
+            text = str(raw).strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                times.append(datetime.fromisoformat(text))
+            except ValueError:
+                continue
+        newest_first = (
+            all(times[i] >= times[i + 1] for i in range(len(times) - 1))
+            if len(times) > 1
+            else True
+        )
+        log = logger.info if not self._logged_sort_check else logger.debug
+        log(
+            "OLX sort check | query=%r | sort_by=%s | page_results=%d | "
+            "newest_first=%s | first_created=%s | last_created=%s",
+            query,
+            self._sort_by,
+            len(offers),
+            newest_first,
+            times[0].isoformat() if times else None,
+            times[-1].isoformat() if times else None,
+        )
+        if not self._logged_sort_check:
+            self._logged_sort_check = True
+            if not newest_first:
+                logger.warning(
+                    "OLX did not return newest-first results for sort_by=%r; "
+                    "new-listing detection relies on SQLite de-duplication, not "
+                    "API order",
+                    self._sort_by,
+                )
 
     def _parse_offer(self, offer: Dict[str, Any]) -> Optional[Listing]:
         """Convert a raw OLX offer dict into a :class:`Listing`.

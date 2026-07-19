@@ -8,7 +8,7 @@
     "base_url": "https://www.olx.pl/api/v1/offers/",
     "user_agent": "Mozilla/5.0 (compatible; PhoneDealBot/1.0)",
     "region_id": null,
-    "sort_by": null,
+    "sort_by": "created_at:desc",
     "include_promoted": false,
     "extra_params": {},
     "poll_interval_seconds": 10,
@@ -17,6 +17,7 @@
     "request_timeout_seconds": 15,
     "results_per_query": 40,
     "pages_per_poll": 1,
+    "prime_pages_per_query": 5,
     "search_queries": [
       "iphone 11",
       "iphone 12",
