@@ -9,7 +9,9 @@
     "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "region_id": null,
     "sort_by": "created_at:desc",
-    "search_path_prefix": "elektronika/telefony",
+    "search_path_prefix": "elektronika/telefony/smartfony-telefony-komorkowe",
+    "category_id": 1839,
+    "category_name": "Smartfony i telefony komórkowe",
     "include_promoted": false,
     "extra_params": {},
     "poll_interval_seconds": 10,
@@ -20,12 +22,7 @@
     "pages_per_poll": 1,
     "prime_pages_per_query": 5,
     "search_queries": [
-      "iphone 11",
-      "iphone 12",
-      "iphone 13",
-      "iphone 14",
-      "iphone 15",
-      "iphone 16"
+      "iphone"
     ]
   },
   "database": {

@@ -134,7 +134,27 @@ def _offer(
 
 def _render_search_html(ads: list[dict]) -> str:
     """Embed ``ads`` in a minimal ``__PRERENDERED_STATE__`` HTML page."""
-    state = {"listing": {"listing": {"ads": ads, "pageNumber": 0}}}
+    state = {
+        "listing": {
+            "listing": {
+                "ads": ads,
+                "pageNumber": 0,
+                "categoryId": 1839,
+                "requestParams": {
+                    "categoryPath": (
+                        "elektronika/telefony/smartfony-telefony-komorkowe"
+                    ),
+                    "query": "iphone",
+                    "params": {"search[order]": "created_at:desc"},
+                },
+                "params": {
+                    "query": "iphone",
+                    "category_id": 1839,
+                    "sort_by": "created_at:desc",
+                },
+            }
+        }
+    }
     encoded = json.dumps(json.dumps(state, ensure_ascii=False))
     return (
         "<!doctype html><html><head><title>OLX</title></head><body>"
@@ -195,6 +215,10 @@ class FakeServer:
 
     async def start(self) -> None:
         app = web.Application()
+        app.router.add_get(
+            "/elektronika/telefony/smartfony-telefony-komorkowe/q-{slug}/",
+            self._search,
+        )
         app.router.add_get("/elektronika/telefony/q-{slug}/", self._search)
         app.router.add_get("/q-{slug}/", self._search)
         app.router.add_post("/webhook", self._webhook)
@@ -228,10 +252,6 @@ class FakeServer:
         self.webhook_payloads.append(await request.json())
         return web.Response(status=204)
 
-    async def _webhook(self, request: web.Request) -> web.Response:
-        self.webhook_payloads.append(await request.json())
-        return web.Response(status=204)
-
 
 def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
     return AppConfig(
@@ -244,7 +264,11 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         olx_sort_by="created_at:desc",
         olx_include_promoted=False,
         olx_extra_params={},
-        olx_search_path_prefix="elektronika/telefony",
+        olx_search_path_prefix=(
+            "elektronika/telefony/smartfony-telefony-komorkowe"
+        ),
+        olx_category_id=1839,
+        olx_category_name="Smartfony i telefony komórkowe",
         poll_interval_seconds=0.1,
         jitter_seconds=0.0,
         max_backoff_seconds=1.0,
@@ -252,7 +276,7 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         results_per_query=40,
         pages_per_poll=1,
         prime_pages_per_query=1,
-        search_queries=["iphone 13"],
+        search_queries=["iphone"],
         database_path=":memory:",
         minimum_profit=300.0,
         stats_interval_seconds=0.0,
@@ -287,6 +311,8 @@ async def _run_cycles(
             base_url=monitor._config.olx_base_url,
             sort_by=monitor._config.olx_sort_by,
             search_path_prefix=monitor._config.olx_search_path_prefix,
+            category_id=monitor._config.olx_category_id,
+            category_name=monitor._config.olx_category_name,
         )
         notifier = DiscordNotifier(
             session,
@@ -356,9 +382,12 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             olx = OlxClient(
                 session,
                 base_url=f"{server.base_url}/",
-                search_path_prefix="elektronika/telefony",
+                search_path_prefix=(
+                    "elektronika/telefony/smartfony-telefony-komorkowe"
+                ),
+                category_id=1839,
             )
-            listings = await olx.search("iphone 13")
+            listings = await olx.search("iphone")
         by_id = {listing.id: listing for listing in listings}
         # Promoted 2006 filtered by the client already.
         assert "2006" not in by_id, "promoted listing should be filtered by client"
@@ -462,7 +491,10 @@ async def test_priming_suppresses_first_cycle() -> None:
         assert server.webhook_payloads == [], server.webhook_payloads
         assert server.last_offer_params is not None
         assert server.last_offer_params.get("search[order]") == "created_at:desc"
-        assert "/elektronika/telefony/q-iphone-13/" in server.last_request_path
+        assert (
+            "/elektronika/telefony/smartfony-telefony-komorkowe/q-iphone/"
+            in server.last_request_path
+        )
         assert any("0 unseen listings" in msg for msg in log_capture.messages), (
             log_capture.messages
         )

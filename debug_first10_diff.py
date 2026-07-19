@@ -149,6 +149,8 @@ async def run(
             include_promoted=config.olx_include_promoted,
             extra_params=config.olx_extra_params,
             search_path_prefix=config.olx_search_path_prefix,
+            category_id=config.olx_category_id,
+            category_name=config.olx_category_name,
         )
         notifier = DiscordNotifier(
             session,

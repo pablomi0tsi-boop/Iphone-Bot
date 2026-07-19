@@ -40,7 +40,20 @@ _PRERENDERED_STRING_RE = re.compile(r'^("(?:\\.|[^"\\])*")\s*;', re.S)
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Listing", "OlxClient"]
+__all__ = [
+    "Listing",
+    "OlxClient",
+    "DEFAULT_SMARTPHONES_CATEGORY_ID",
+    "DEFAULT_SMARTPHONES_CATEGORY_PATH",
+    "DEFAULT_SMARTPHONES_CATEGORY_NAME",
+]
+
+# Electronics → Phones → Smartphones and mobile phones (manual website filters).
+DEFAULT_SMARTPHONES_CATEGORY_ID = 1839
+DEFAULT_SMARTPHONES_CATEGORY_PATH = (
+    "elektronika/telefony/smartfony-telefony-komorkowe"
+)
+DEFAULT_SMARTPHONES_CATEGORY_NAME = "Smartfony i telefony komórkowe"
 
 
 @dataclass(slots=True)
@@ -99,7 +112,9 @@ class OlxClient:
         sort_by: Optional[str] = None,
         include_promoted: bool = False,
         extra_params: Optional[Dict[str, Any]] = None,
-        search_path_prefix: str = "elektronika/telefony",
+        search_path_prefix: str = DEFAULT_SMARTPHONES_CATEGORY_PATH,
+        category_id: Optional[int] = DEFAULT_SMARTPHONES_CATEGORY_ID,
+        category_name: str = DEFAULT_SMARTPHONES_CATEGORY_NAME,
     ) -> None:
         """Create the client.
 
@@ -115,8 +130,12 @@ class OlxClient:
         :param include_promoted: When ``False`` (default) promoted cards
             (``searchReason == "promoted"`` / ``isPromoted is True``) are dropped.
         :param extra_params: Extra query-string params merged into every request.
-        :param search_path_prefix: Optional category path prefix before
-            ``q-<query>/`` (default phones category).
+        :param search_path_prefix: Category path prefix before ``q-<query>/``.
+            Default is Electronics → Phones → Smartphones and mobile phones
+            (``elektronika/telefony/smartfony-telefony-komorkowe``). Do not leave
+            empty — that would search the whole marketplace.
+        :param category_id: Expected OLX category id (default ``1839``).
+        :param category_name: Human label used in request logs.
         """
         self._session = session
         self._base_url = self._normalize_site_base(base_url)
@@ -125,7 +144,17 @@ class OlxClient:
         self._sort_by = sort_by or "created_at:desc"
         self._include_promoted = include_promoted
         self._extra_params = dict(extra_params or {})
-        self._search_path_prefix = (search_path_prefix or "").strip().strip("/")
+        prefix = (search_path_prefix or "").strip().strip("/")
+        if not prefix:
+            # Never fall back to marketplace-wide ``/q-…/`` search.
+            prefix = DEFAULT_SMARTPHONES_CATEGORY_PATH
+        self._search_path_prefix = prefix
+        self._category_id = (
+            int(category_id)
+            if category_id is not None
+            else DEFAULT_SMARTPHONES_CATEGORY_ID
+        )
+        self._category_name = category_name or DEFAULT_SMARTPHONES_CATEGORY_NAME
         self._headers = {
             "User-Agent": user_agent,
             "Accept": "text/html,application/xhtml+xml,application/json",
@@ -179,9 +208,12 @@ class OlxClient:
             if page == 0:
                 first_ids = [listing.id for listing in collected[:10]]
                 logger.info(
-                    "OLX poll IDs | query=%r | source=website-prerendered | "
-                    "sort_by=%s | first10_ids=%s | organic_total_so_far=%d",
+                    "OLX poll IDs | query=%r | category_id=%s | category_path=%s | "
+                    "source=website-prerendered | sort_by=%s | first10_ids=%s | "
+                    "organic_total_so_far=%d",
                     query,
+                    self._category_id,
+                    self._search_path_prefix,
                     self._sort_by,
                     first_ids,
                     len(collected),
@@ -203,10 +235,7 @@ class OlxClient:
         """Build the public website search URL for ``query`` / ``page``."""
         slug = re.sub(r"\s+", "-", query.strip().lower())
         slug = quote(slug, safe="-")
-        if self._search_path_prefix:
-            path = f"{self._search_path_prefix}/q-{slug}/"
-        else:
-            path = f"q-{slug}/"
+        path = f"{self._search_path_prefix}/q-{slug}/"
         return urljoin(self._base_url, path)
 
     async def _fetch_page_ads(self, query: str, *, page: int) -> List[Dict[str, Any]]:
@@ -224,6 +253,21 @@ class OlxClient:
 
         timeout = aiohttp.ClientTimeout(total=self._request_timeout)
         url = self._search_url(query, page=page)
+        # Log the category scope for every HTTP request so operators can verify
+        # it matches the manual website filters (Smartphones category + iphone).
+        logger.info(
+            "OLX search request | category_id=%s | category_path=%s | "
+            "category_name=%s | query=%r | sort_by=%s | page=%d | url=%s | "
+            "params=%s",
+            self._category_id,
+            self._search_path_prefix,
+            self._category_name,
+            query,
+            self._sort_by,
+            page + 1,
+            url,
+            params,
+        )
         async with self._session.get(
             url,
             params=params,
@@ -232,6 +276,7 @@ class OlxClient:
         ) as response:
             response.raise_for_status()
             html = await response.text()
+            response_url = str(response.url)
 
         state = self._extract_prerendered_state(html)
         listing = (
@@ -241,11 +286,59 @@ class OlxClient:
         )
         if not isinstance(listing, dict):
             logger.warning(
-                "OLX prerendered state missing listing payload for query=%r page=%d",
+                "OLX prerendered state missing listing payload | query=%r | "
+                "page=%d | category_id=%s | url=%s",
                 query,
-                page,
+                page + 1,
+                self._category_id,
+                response_url,
             )
             return []
+
+        response_category_id = listing.get("categoryId")
+        request_params = listing.get("requestParams") or {}
+        listing_params = listing.get("params") or {}
+        logger.info(
+            "OLX search response | category_id=%s | category_path=%s | "
+            "response_category_id=%s | response_category_path=%s | "
+            "response_query=%r | response_sort_by=%s | query=%r | page=%d | "
+            "url=%s",
+            self._category_id,
+            self._search_path_prefix,
+            response_category_id,
+            (
+                request_params.get("categoryPath")
+                if isinstance(request_params, dict)
+                else None
+            ),
+            (
+                request_params.get("query")
+                if isinstance(request_params, dict)
+                else listing_params.get("query")
+                if isinstance(listing_params, dict)
+                else None
+            ),
+            (
+                listing_params.get("sort_by")
+                if isinstance(listing_params, dict)
+                else None
+            ),
+            query,
+            page + 1,
+            response_url,
+        )
+        if (
+            response_category_id is not None
+            and int(response_category_id) != int(self._category_id)
+        ):
+            logger.warning(
+                "OLX response category_id mismatch | expected=%s | got=%s | "
+                "url=%s",
+                self._category_id,
+                response_category_id,
+                response_url,
+            )
+
         ads = listing.get("ads") or []
         if not isinstance(ads, list):
             return []

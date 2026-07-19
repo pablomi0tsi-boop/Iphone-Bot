@@ -45,7 +45,13 @@ import aiohttp
 
 from database import ListingDatabase
 from discord import DiscordNotifier
-from olx import Listing, OlxClient
+from olx import (
+    Listing,
+    OlxClient,
+    DEFAULT_SMARTPHONES_CATEGORY_ID,
+    DEFAULT_SMARTPHONES_CATEGORY_NAME,
+    DEFAULT_SMARTPHONES_CATEGORY_PATH,
+)
 from pricing import PriceBook, detect_phone
 
 logger = logging.getLogger("phonedealbot")
@@ -120,6 +126,8 @@ class AppConfig:
     olx_include_promoted: bool
     olx_extra_params: Dict[str, Any]
     olx_search_path_prefix: str
+    olx_category_id: int
+    olx_category_name: str
     poll_interval_seconds: float
     jitter_seconds: float
     max_backoff_seconds: float
@@ -226,7 +234,17 @@ def load_config(path: str | Path) -> AppConfig:
         olx_include_promoted=bool(olx.get("include_promoted", False)),
         olx_extra_params=dict(olx.get("extra_params", {})),
         olx_search_path_prefix=str(
-            olx.get("search_path_prefix", "elektronika/telefony")
+            olx.get("search_path_prefix", DEFAULT_SMARTPHONES_CATEGORY_PATH)
+            or DEFAULT_SMARTPHONES_CATEGORY_PATH
+        ).strip().strip("/")
+        or DEFAULT_SMARTPHONES_CATEGORY_PATH,
+        olx_category_id=int(
+            olx.get("category_id", DEFAULT_SMARTPHONES_CATEGORY_ID)
+            or DEFAULT_SMARTPHONES_CATEGORY_ID
+        ),
+        olx_category_name=str(
+            olx.get("category_name", DEFAULT_SMARTPHONES_CATEGORY_NAME)
+            or DEFAULT_SMARTPHONES_CATEGORY_NAME
         ),
         poll_interval_seconds=_number(olx, "poll_interval_seconds", 10, minimum=1),
         jitter_seconds=_number(olx, "jitter_seconds", 2, minimum=0),
@@ -507,12 +525,19 @@ class DealMonitor:
         """Run the monitor until a stop is requested."""
         logger.info(
             "Starting OLX iPhone deal monitor | minimum_profit=%.2f PLN | "
-            "webhook=%s | db=%s | debug_notify_all=%s | max_listing_age=%ss",
+            "webhook=%s | db=%s | debug_notify_all=%s | max_listing_age=%ss | "
+            "category_id=%s | category_path=%s | category_name=%s | "
+            "search_queries=%s | sort_by=%s",
             self._config.minimum_profit,
             "configured" if self._config.webhook_url else "dry-run",
             self._config.database_path,
             self._config.debug_notify_all,
             self._config.max_listing_age_seconds,
+            self._config.olx_category_id,
+            self._config.olx_search_path_prefix,
+            self._config.olx_category_name,
+            self._config.search_queries,
+            self._config.olx_sort_by,
         )
         if self._config.debug_notify_all:
             logger.warning(
@@ -554,6 +579,8 @@ class DealMonitor:
                 include_promoted=self._config.olx_include_promoted,
                 extra_params=self._config.olx_extra_params,
                 search_path_prefix=self._config.olx_search_path_prefix,
+                category_id=self._config.olx_category_id,
+                category_name=self._config.olx_category_name,
             )
             notifier = DiscordNotifier(
                 session,
