@@ -5,10 +5,13 @@
     "rate_limit_seconds": 0.5
   },
   "olx": {
-    "base_url": "https://www.olx.pl/api/v1/offers/",
-    "user_agent": "Mozilla/5.0 (compatible; PhoneDealBot/1.0)",
+    "base_url": "https://www.olx.pl/",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "region_id": null,
-    "sort_by": null,
+    "sort_by": "created_at:desc",
+    "search_path_prefix": "elektronika/telefony/smartfony-telefony-komorkowe",
+    "category_id": 1839,
+    "category_name": "Smartfony i telefony komórkowe",
     "include_promoted": false,
     "extra_params": {},
     "poll_interval_seconds": 10,
@@ -17,19 +20,17 @@
     "request_timeout_seconds": 15,
     "results_per_query": 40,
     "pages_per_poll": 1,
+    "prime_pages_per_query": 5,
     "search_queries": [
-      "iphone 11",
-      "iphone 12",
-      "iphone 13",
-      "iphone 14",
-      "iphone 15",
-      "iphone 16"
+      "iphone"
     ]
   },
   "database": {
     "path": "listings.db"
   },
   "minimum_profit": 1,
+  "debug_notify_all": true,
+  "max_listing_age_seconds": 120,
   "stats_interval_seconds": 600,
   "prime_on_start": true,
   "blacklist_keywords": [
@@ -51,8 +52,28 @@
   "accessory_keywords": [
     "etui",
     "case",
-    "pokrowiec",
+    "cover",
     "szkło",
+    "glass",
+    "folia",
+    "ładowarka",
+    "charger",
+    "kabel",
+    "cable",
+    "magsafe",
+    "uchwyt",
+    "holder",
+    "bumper",
+    "obudowa",
+    "pokrowiec",
+    "silikon",
+    "adapter",
+    "powerbank",
+    "słuchawki",
+    "airpods case",
+    "airpods",
+    "części zamienne",
+    "części",
     "szybka",
     "wyświetlacz",
     "ekran",
@@ -61,12 +82,7 @@
     "bateria",
     "taśma",
     "płyta",
-    "części",
     "housing",
-    "obudowa",
-    "ładowarka",
-    "kabel",
-    "airpods",
     "apple watch"
   ],
   "resale_prices": {

@@ -15,6 +15,7 @@ import asyncio
 import json
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
@@ -23,7 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from database import ListingDatabase  # noqa: E402
 from discord import DiscordNotifier  # noqa: E402
-from main import load_config  # noqa: E402
+from main import (  # noqa: E402
+    listing_age_seconds,
+    load_config,
+    parse_listing_published_at,
+)
 from olx import Listing  # noqa: E402
 
 
@@ -62,6 +67,83 @@ async def test_db_recovers_from_corruption() -> None:
     print("PASS: corrupt database is quarantined and recreated")
 
 
+async def test_db_blocks_insert_before_unseen_and_logs_contains() -> None:
+    """INSERT before mark_unseen_computed is blocked; contains logs baseline."""
+    import logging
+
+    class Capture(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__(level=logging.INFO)
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(record.getMessage())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "listings.db"
+        db = ListingDatabase(str(path))
+        capture = Capture()
+        db_logger = logging.getLogger("database")
+        app_logger = logging.getLogger("phonedealbot")
+        db_logger.addHandler(capture)
+        app_logger.addHandler(capture)
+        previous = db_logger.level
+        previous_app = app_logger.level
+        db_logger.setLevel(logging.INFO)
+        app_logger.setLevel(logging.INFO)
+        try:
+            await db.connect()
+            await db.mark_seen("seed", source="olx", title="seed", notified=False)
+            db.begin_poll("test-query")
+            try:
+                raised = False
+                try:
+                    await db.mark_seen(
+                        "premature", source="olx", title="too early", notified=False
+                    )
+                except RuntimeError as exc:
+                    raised = True
+                    assert "before unseen" in str(exc)
+                assert raised, "INSERT before unseen calc must raise"
+
+                baseline = await db.seen_subset(["seed", "fresh"])
+                db.mark_unseen_computed(baseline)
+                assert await db.contains("seed") is True
+                assert await db.contains("fresh") is False
+                await db.mark_seen(
+                    "fresh", source="olx", title="ok", notified=False
+                )
+            finally:
+                db.end_poll()
+        finally:
+            db_logger.removeHandler(capture)
+            app_logger.removeHandler(capture)
+            db_logger.setLevel(previous)
+            app_logger.setLevel(previous_app)
+            await db.close()
+
+        contains_logs = [m for m in capture.messages if m.startswith("database.contains |")]
+        assert len(contains_logs) >= 2, capture.messages
+        seed_log = next(m for m in contains_logs if "id=seed" in m)
+        fresh_log = next(m for m in contains_logs if "id=fresh" in m)
+        assert f"path={path}" in seed_log or str(path) in seed_log
+        assert "absolute_path=" in seed_log
+        assert "row_count=" in seed_log
+        assert "existed_before_current_poll=True" in seed_log
+        assert "existed_before_current_poll=False" in fresh_log
+        assert any(
+            "SQLite instrumentation ACTIVE" in m for m in capture.messages
+        ), capture.messages
+        insert_logs = [m for m in capture.messages if m.startswith("database.INSERT |")]
+        assert any("id=fresh" in m and "timestamp=" in m for m in insert_logs), (
+            capture.messages
+        )
+        assert any("INSERT_BEFORE_UNSEEN" in m for m in capture.messages), (
+            capture.messages
+        )
+    print("PASS: INSERT before unseen blocked; contains/INSERT instrumented")
+
+
 # --------------------------------------------------------------------------- #
 # Config validation
 # --------------------------------------------------------------------------- #
@@ -83,8 +165,39 @@ def test_config_defaults_and_minimum_profit() -> None:
         assert cfg.minimum_profit == 300.0  # documented default
         assert cfg.poll_interval_seconds == 10
         assert cfg.stats_interval_seconds == 600
+        assert cfg.debug_notify_all is False  # normal filtering by default
+        assert cfg.max_listing_age_seconds == 120.0  # 2-minute freshness window
+        assert cfg.olx_sort_by == "created_at:desc"  # request newest-first
+        assert (
+            cfg.olx_search_path_prefix
+            == "elektronika/telefony/smartfony-telefony-komorkowe"
+        )
+        assert cfg.olx_category_id == 1839
+        assert cfg.prime_pages_per_query >= 1
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
     print("PASS: config defaults + minimum_profit default (300)")
+
+
+def test_listing_age_timezone_handling() -> None:
+    """Age must convert +02:00 publication times to UTC before subtracting.
+
+    A naive wall-clock subtract of ``15:00+02:00`` vs ``13:01 UTC`` looks like
+    ~2 hours; the real age is ~1 minute. Stripping tzinfo reproduces the bug.
+    """
+    published = parse_listing_published_at("2026-07-19T15:00:00+02:00")
+    assert published is not None
+    assert published.utcoffset() == timedelta(hours=2)
+
+    now = datetime(2026, 7, 19, 13, 1, 0, tzinfo=timezone.utc)
+    age = listing_age_seconds(published, now)
+    assert abs(age - 60.0) < 1e-6, f"expected ~60s age, got {age}"
+
+    # The incorrect naive strip would report ~-2h or ~+2h depending on order.
+    naive_skew = (
+        now.replace(tzinfo=None) - published.replace(tzinfo=None)
+    ).total_seconds()
+    assert abs(naive_skew - age) == timedelta(hours=2).total_seconds()
+    print("PASS: listing age converts +02:00 to UTC (no 2h skew)")
 
 
 def test_config_rejects_invalid_json() -> None:
@@ -184,7 +297,9 @@ async def test_discord_retries_on_timeout() -> None:
 async def _main() -> None:
     await test_db_creates_nested_path()
     await test_db_recovers_from_corruption()
+    await test_db_blocks_insert_before_unseen_and_logs_contains()
     test_config_defaults_and_minimum_profit()
+    test_listing_age_timezone_handling()
     test_config_rejects_invalid_json()
     test_config_rejects_bad_values()
     test_config_rejects_bad_resale_prices()

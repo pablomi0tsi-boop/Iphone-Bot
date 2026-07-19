@@ -70,18 +70,19 @@ class DiscordNotifier:
         self,
         listing: "Listing",
         *,
-        resale_price: float,
-        profit: float,
-        model: str,
-        storage_gb: int,
+        resale_price: Optional[float],
+        profit: Optional[float],
+        model: Optional[str],
+        storage_gb: Optional[int],
     ) -> bool:
-        """Send a formatted notification for a profitable ``listing``.
+        """Send a formatted notification for a ``listing``.
 
-        :param listing: The listing that matched.
-        :param resale_price: Configured expected resale price for the phone.
-        :param profit: ``resale_price - listing_price``.
-        :param model: Detected phone model (e.g. ``"iPhone 13 Pro"``).
-        :param storage_gb: Detected storage capacity in GB.
+        :param listing: The listing that matched (or every new listing in
+            ``debug_notify_all`` mode).
+        :param resale_price: Configured expected resale price, if known.
+        :param profit: ``resale_price - listing_price`` when both are known.
+        :param model: Detected phone model, if known.
+        :param storage_gb: Detected storage capacity in GB, if known.
         :returns: ``True`` if the message was accepted by Discord, else
             ``False``. Dry-run (no webhook configured) counts as success.
         """
@@ -89,8 +90,8 @@ class DiscordNotifier:
 
         if not self.enabled:
             logger.info(
-                "[dry-run] Would notify: %s %dGB | price=%s%s | resale=%.2f | "
-                "profit=%.2f | %s",
+                "[dry-run] Would notify: model=%s storage=%s | price=%s%s | "
+                "resale=%s | profit=%s | %s",
                 model,
                 storage_gb,
                 listing.price,
@@ -104,8 +105,10 @@ class DiscordNotifier:
         return await self._post(payload)
 
     @staticmethod
-    def _format_storage(storage_gb: int) -> str:
+    def _format_storage(storage_gb: Optional[int]) -> str:
         """Human-friendly storage label, e.g. ``256GB`` or ``1TB``."""
+        if storage_gb is None:
+            return "n/a"
         if storage_gb % 1024 == 0:
             return f"{storage_gb // 1024}TB"
         return f"{storage_gb}GB"
@@ -113,18 +116,24 @@ class DiscordNotifier:
     def _build_payload(
         self,
         listing: "Listing",
-        resale_price: float,
-        profit: float,
-        model: str,
-        storage_gb: int,
+        resale_price: Optional[float],
+        profit: Optional[float],
+        model: Optional[str],
+        storage_gb: Optional[int],
     ) -> dict:
         """Construct the Discord webhook JSON payload with a rich embed."""
         currency = f" {listing.currency}" if listing.currency else ""
         price_text = (
             f"{listing.price:.2f}{currency}" if listing.has_price else "n/a"
         )
+        resale_text = (
+            f"{resale_price:.2f}{currency}" if resale_price is not None else "n/a"
+        )
+        profit_text = (
+            f"{profit:.2f}{currency}" if profit is not None else "n/a"
+        )
         fields = [
-            {"name": "📱 Model", "value": model, "inline": True},
+            {"name": "📱 Model", "value": model or "n/a", "inline": True},
             {
                 "name": "💾 Storage",
                 "value": self._format_storage(storage_gb),
@@ -137,12 +146,12 @@ class DiscordNotifier:
             },
             {
                 "name": "🏷️ My resale price",
-                "value": f"{resale_price:.2f}{currency}",
+                "value": resale_text,
                 "inline": True,
             },
             {
                 "name": "📈 Expected profit",
-                "value": f"{profit:.2f}{currency}",
+                "value": profit_text,
                 "inline": True,
             },
             {
@@ -168,7 +177,7 @@ class DiscordNotifier:
         ]
 
         embed: dict = {
-            "title": "🔥 DEAL FOUND",
+            "title": "🆕 NEW LISTING" if profit is None else "🔥 DEAL FOUND",
             "description": listing.title or None,
             "url": listing.url or None,
             "color": _EMBED_COLOR,
