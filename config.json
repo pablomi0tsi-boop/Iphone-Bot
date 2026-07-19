@@ -40,7 +40,12 @@
     "zbity",
     "czytaj opis",
     "locked",
-    "for parts"
+    "for parts",
+    "zamienię",
+    "zamiana",
+    "swap",
+    "wymiana",
+    "trade"
   ],
   "resale_prices": {
     "iPhone 11": { "64GB": 350, "128GB": 400, "256GB": 450 },

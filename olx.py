@@ -62,6 +62,9 @@ class Listing:
     location: Optional[str] = None
     image_url: Optional[str] = None
     description: str = ""
+    photo_count: int = 0
+    # ``True``/``False`` when OLX reports the seller type, ``None`` when unknown.
+    is_business: Optional[bool] = None
     # High-confidence structured attributes provided by OLX's phone category
     # (may be absent on many listings, in which case they are ``None``).
     model_hint: Optional[str] = None
@@ -210,6 +213,8 @@ class OlxClient:
 
         params = offer.get("params", [])
         price, currency = self._extract_price(params)
+        photos = offer.get("photos")
+        business = offer.get("business")
         return Listing(
             id=str(offer_id),
             title=(offer.get("title") or "").strip(),
@@ -218,8 +223,10 @@ class OlxClient:
             url=offer.get("url") or "",
             created_at=offer.get("created_time") or offer.get("last_refresh_time"),
             location=self._extract_location(offer.get("location")),
-            image_url=self._extract_image(offer.get("photos")),
+            image_url=self._extract_image(photos),
             description=self._clean_description(offer.get("description")),
+            photo_count=len(photos) if isinstance(photos, list) else 0,
+            is_business=business if isinstance(business, bool) else None,
             model_hint=self._extract_param_label(params, "phonemodel"),
             storage_hint=self._extract_param_label(params, "builtinmemory_phones"),
         )

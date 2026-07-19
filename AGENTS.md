@@ -54,10 +54,14 @@ Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
   `pricing.py` prefers these structured hints, then parses title/description.
 - Storage/model detection is deliberately conservative: text capacities need an
   explicit GB/TB unit and must be unambiguous, else the listing is ignored.
-- `resale_prices` in `config.json` are **EXAMPLE values** — the real list must be
-  provided by the user. Prices drive buy decisions, so never invent them.
-- Swap/"Zamienię" listings report `price = 0`, so `profit = resale` and they DO
-  notify (spec: any `profit > 1`). There is intentionally no min-price floor.
+- `resale_prices` in `config.json` are the user's real PLN values. Prices drive
+  buy decisions, so never invent them.
+- Deal filtering (in `DealMonitor.evaluate`) ignores: blacklist keyword hits
+  (incl. swap terms), `price <= 0`, listings with no photos, business-account
+  sellers (`Listing.is_business is True`), and unconfident model/storage.
+  Promoted ads are already dropped in `OlxClient.search`.
+- Swap listings report `price = 0` (and usually a swap keyword), so they are
+  filtered by BOTH the zero-price rule and the swap blacklist words.
 - Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
   index lag (server-side, uncontrollable). "Within seconds" is best-effort, not
   guaranteed.
