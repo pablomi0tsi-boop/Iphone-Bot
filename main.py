@@ -9,10 +9,14 @@ description), matches it against the user's expected **resale price list** in
 
 is at least ``minimum_profit`` (default: 300 PLN).
 
-Listings are ignored when they contain a blacklisted/accessory keyword, have no
-price or a price of ``0``, have no photos, come from a business seller, or when
-the model/storage cannot be determined confidently (or has no configured resale
-price).
+Listings are ignored when the title/description contains a blacklisted keyword
+(``icloud``, ``uszkodzony``, swap terms, ...) or the *title* contains an
+accessory keyword (``etui``, ``bateria``, ``kabel``, ...); when there is no
+price or a price of ``0``; when there are no photos; when the seller is a
+business account; or when the model/storage cannot be determined confidently
+(or has no configured resale price). Keyword matching is boundary-aware so
+negated/prefixed words (``"nieuszkodzony"``, ``"unlocked"``) do not trigger a
+match meant for the opposite word (``"uszkodzony"``, ``"locked"``).
 
 Run it with::
 
@@ -34,11 +38,12 @@ import asyncio
 import json
 import logging
 import random
+import re
 import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Pattern, Tuple
 
 import aiohttp
 
@@ -52,6 +57,30 @@ logger = logging.getLogger("phonedealbot")
 # Item pushed onto the notification queue:
 #   (listing, model, storage_gb, resale_price, profit, query)
 DealItem = Tuple[Listing, str, int, float, float, str]
+
+# Polish letters treated as "word characters" for the keyword-boundary check
+# below (spelled out explicitly so the intent is unambiguous regardless of
+# locale/``re`` flags).
+_PL_WORD_CHARS = "a-ząćęłńóśźż0-9"
+
+
+def _compile_keyword_patterns(keywords: List[str]) -> List[Pattern[str]]:
+    """Compile keyword-match patterns that avoid two classes of false hits:
+
+    * **Negation/prefix gluing**: a bare substring check would match
+      ``"uszkodzony"`` (damaged) inside ``"nieuszkodzony"`` (**not** damaged),
+      or ``"locked"`` inside ``"unlocked"`` -- inverting the intended meaning.
+      A negative look-behind for a preceding letter/digit prevents this while
+      still matching the keyword as a normal whole word.
+    * Polish noun/adjective *suffix* inflections (e.g. ``"ekran"`` ->
+      ``"ekranu"``/``"ekranie"``) are intentionally still matched -- only the
+      start of the keyword is boundary-checked, not the end.
+    """
+    return [
+        re.compile(rf"(?<![{_PL_WORD_CHARS}]){re.escape(keyword)}")
+        for keyword in keywords
+        if keyword
+    ]
 
 
 # --------------------------------------------------------------------------- #
@@ -204,6 +233,8 @@ class DealMonitor:
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[DealItem] = asyncio.Queue()
         self._stats = Stats()
+        self._blacklist_patterns = _compile_keyword_patterns(config.blacklist_keywords)
+        self._accessory_patterns = _compile_keyword_patterns(config.accessory_keywords)
 
     def request_stop(self) -> None:
         """Signal every polling loop to finish promptly and exit."""
@@ -212,16 +243,27 @@ class DealMonitor:
 
     # -- matching ----------------------------------------------------------- #
     def has_filtered_keyword(self, listing: Listing) -> bool:
-        """Return ``True`` if the listing text contains a blacklisted or
-        accessory keyword (checked against both title and description)."""
-        text = listing.search_text
-        return any(
-            keyword in text
-            for keyword in self._config.blacklist_keywords
-        ) or any(
-            keyword in text
-            for keyword in self._config.accessory_keywords
-        )
+        """Return ``True`` if the listing is disqualified by a keyword.
+
+        * **Blacklist keywords** (``icloud``, ``uszkodzony``, swap terms, ...)
+          describe a problem with the phone itself, which a seller may only
+          mention in the description -- so these are checked against the full
+          title + description text.
+        * **Accessory keywords** (``etui``, ``bateria``, ``kabel``, ...) are
+          checked against the **title only**. Genuine accessory-only ads name
+          the accessory in the title (e.g. ``"Etui iPhone 13"``,
+          ``"Bateria do iPhone 12"``). Checking the description too would
+          reject the vast majority of ordinary phone listings, which routinely
+          mention battery health, minor cosmetic wear or bundled extras as
+          part of a normal sale (e.g. ``"bateria 89%"``, ``"dorzucam etui"``,
+          ``"kabel w zestawie"``) -- this previously caused the monitor to
+          silently drop the large majority of real, profitable listings.
+        """
+        full_text = listing.search_text
+        if any(pattern.search(full_text) for pattern in self._blacklist_patterns):
+            return True
+        title_text = listing.title.lower()
+        return any(pattern.search(title_text) for pattern in self._accessory_patterns)
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
         """Evaluate a listing; return a :data:`DealItem` if it is a deal.
@@ -229,8 +271,10 @@ class DealMonitor:
         Returns ``None`` (and the caller records it as seen) when the listing is
         filtered out. A listing is ignored when it:
 
-        * contains a blacklisted or accessory keyword (swap terms, ``etui``,
-          ``bateria``, ``airpods``, ...),
+        * contains a blacklisted keyword anywhere (swap terms, ``icloud``,
+          ``uszkodzony``, ...) or an accessory keyword in the *title*
+          (``etui``, ``bateria``, ``airpods``, ...) -- see
+          :meth:`has_filtered_keyword`,
         * has no price or a price of ``0`` (swap/trade offers),
         * has no photos attached,
         * is posted by a business account (when OLX reports the seller type),
