@@ -663,19 +663,36 @@ class DealMonitor:
         during startup priming or any earlier poll) are considered. During
         priming every new id is recorded with ``notified=False`` and no Discord
         message is sent.
+
+        After priming, every unseen listing is logged **before** deal filters
+        run (id, title, created_at, price), then again with ``inserted=`` after
+        the SQLite write — so empty polls surface as ``0 unseen listings``.
         """
         if not listings:
+            if not priming:
+                logger.info("[%s] 0 unseen listings", query)
             return
 
         ids = [listing.id for listing in listings]
         already_seen = await self._db.seen_subset(ids)
         new_listings = [listing for listing in listings if listing.id not in already_seen]
+
+        # Post-prime visibility: did the website parser find anything new?
+        if not priming:
+            if not new_listings:
+                logger.info("[%s] 0 unseen listings", query)
+                return
+            for listing in new_listings:
+                logger.info(
+                    "Unseen listing (pre-filter) | id=%s | title=%r | "
+                    "created_at=%s | price=%s",
+                    listing.id,
+                    listing.title,
+                    listing.created_at,
+                    listing.price,
+                )
+
         if not new_listings:
-            logger.debug(
-                "[%s] %d listing(s) fetched, 0 new since previous cycle",
-                query,
-                len(listings),
-            )
             return
 
         self._stats.listings_checked += len(new_listings)
@@ -727,6 +744,17 @@ class DealMonitor:
             )
 
         await self._db.mark_seen_many(records)
+        confirmed = await self._db.seen_subset([listing.id for listing in new_listings])
+        for listing in new_listings:
+            logger.info(
+                "Unseen listing | id=%s | title=%r | created_at=%s | price=%s | "
+                "inserted=%s",
+                listing.id,
+                listing.title,
+                listing.created_at,
+                listing.price,
+                listing.id in confirmed,
+            )
 
         # Deliver the most profitable deals first for lowest time-to-alert.
         # Listings without a calculable profit sort last.

@@ -447,12 +447,25 @@ async def test_priming_suppresses_first_cycle() -> None:
     await server.start()
     try:
         monitor = DealMonitor(_build_config(server, prime=True))
-        # Cycle 0 primes; cycle 1 sees the same catalogue — still no notify.
-        await _run_cycles(monitor, cycles=2, priming_first_cycle=True)
+        log_capture = _LogCapture()
+        main_logger = logging.getLogger("phonedealbot")
+        main_logger.addHandler(log_capture)
+        previous_level = main_logger.level
+        main_logger.setLevel(logging.INFO)
+        try:
+            # Cycle 0 primes; cycle 1 sees the same catalogue — still no notify.
+            await _run_cycles(monitor, cycles=2, priming_first_cycle=True)
+        finally:
+            main_logger.removeHandler(log_capture)
+            main_logger.setLevel(previous_level)
+
         assert server.webhook_payloads == [], server.webhook_payloads
         assert server.last_offer_params is not None
         assert server.last_offer_params.get("search[order]") == "created_at:desc"
         assert "/elektronika/telefony/q-iphone-13/" in server.last_request_path
+        assert any("0 unseen listings" in msg for msg in log_capture.messages), (
+            log_capture.messages
+        )
         print("PASS: priming suppresses notifications on first + later cycles")
     finally:
         await server.stop()
@@ -464,6 +477,11 @@ async def test_only_post_prime_new_listings_notify() -> None:
     await server.start()
     try:
         monitor = DealMonitor(_build_config(server, prime=True))
+        log_capture = _LogCapture()
+        main_logger = logging.getLogger("phonedealbot")
+        main_logger.addHandler(log_capture)
+        previous_level = main_logger.level
+        main_logger.setLevel(logging.INFO)
 
         async def _inject_new(_cycle: int) -> None:
             server.offers = list(server.offers) + [
@@ -478,15 +496,35 @@ async def test_only_post_prime_new_listings_notify() -> None:
                 )
             ]
 
-        await _run_cycles(
-            monitor,
-            cycles=2,
-            priming_first_cycle=True,
-            between_cycles=_inject_new,
-        )
+        try:
+            await _run_cycles(
+                monitor,
+                cycles=2,
+                priming_first_cycle=True,
+                between_cycles=_inject_new,
+            )
+        finally:
+            main_logger.removeHandler(log_capture)
+            main_logger.setLevel(previous_level)
+
         assert len(server.webhook_payloads) == 1, server.webhook_payloads
         embed = server.webhook_payloads[0]["embeds"][0]
         assert "brand new after prime" in (embed.get("description") or "")
+        pre = [
+            msg
+            for msg in log_capture.messages
+            if "Unseen listing (pre-filter)" in msg and "id=2099" in msg
+        ]
+        assert pre, log_capture.messages
+        assert "title=" in pre[0] and "created_at=" in pre[0] and "price=" in pre[0]
+        post = [
+            msg
+            for msg in log_capture.messages
+            if msg.startswith("Unseen listing |")
+            and "id=2099" in msg
+            and "inserted=True" in msg
+        ]
+        assert post, log_capture.messages
         print("PASS: only listings first seen after priming notify")
     finally:
         await server.stop()
