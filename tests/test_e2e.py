@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
@@ -42,6 +43,16 @@ class _LogCapture(logging.Handler):
         self.messages.append(record.getMessage())
 
 
+def _fresh_created_time() -> str:
+    """ISO timestamp within the 2-minute freshness window."""
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _stale_created_time() -> str:
+    """ISO timestamp older than the 2-minute freshness window."""
+    return (datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()
+
+
 def _offer(
     offer_id: int,
     title: str,
@@ -54,6 +65,7 @@ def _offer(
     business: bool = False,
     seller: str | None = None,
     currency: str = "PLN",
+    created_time: str | None = None,
 ) -> dict:
     """Build an OLX-API-shaped offer dict for the fake server."""
     params = []
@@ -79,7 +91,7 @@ def _offer(
         "id": offer_id,
         "title": title,
         "url": f"https://www.olx.pl/oferta/{offer_id}",
-        "created_time": "2026-07-19T10:00:00+02:00",
+        "created_time": created_time or _fresh_created_time(),
         "description": description,
         "params": params,
         "business": business,
@@ -126,6 +138,10 @@ FAKE_OFFERS = [
     # below minimum_profit (resale 1900 - 1750 = 150 < 300) -> ignore
     _offer(2012, "iPhone 13 128GB", 1750,
            model_label="iPhone 13", storage_label="128GB", photos=3),
+    # otherwise a deal, but published > 2 minutes ago -> ignore
+    _offer(2013, "iPhone 13 128GB świeży ale stary timestamp", 400,
+           model_label="iPhone 13", storage_label="128GB", photos=3,
+           created_time=_stale_created_time()),
 ]
 PROMOTED_INDICES = [5]
 
@@ -199,6 +215,7 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
             }
         ),
         debug_notify_all=False,
+        max_listing_age_seconds=120.0,
     )
 
 
@@ -289,6 +306,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             assert monitor.evaluate(by_id["2010"]) is None           # business account
             assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
             assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
+            assert monitor.evaluate(by_id["2013"]) is None           # too old
         finally:
             main_logger.removeHandler(log_capture)
             main_logger.setLevel(previous_level)
@@ -304,6 +322,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             "2010": "business seller",
             "2011": "accessory keyword: 'bateria'",
             "2012": "profit below threshold",
+            "2013": "listing older than 120s",
         }
         for listing_id, reason_fragment in expected_reasons.items():
             listing = by_id[listing_id]
@@ -329,10 +348,18 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             assert "model=" in match and "storage=" in match
             assert "resale=" in match and "profit=" in match
 
+        # Freshness debug log must include published_at and now for every listing.
+        age_logs = [
+            msg for msg in log_capture.messages if msg.startswith("Listing timestamp |")
+        ]
+        assert len(age_logs) >= len(expected_reasons), age_logs
+        for msg in age_logs:
+            assert "published_at=" in msg and "now=" in msg, msg
+
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
-            "no-photos / business / accessory / below-min-profit ignored "
-            "(with rejection logs including OLX id)"
+            "no-photos / business / accessory / below-min-profit / stale-age ignored "
+            "(with rejection logs including OLX id + published_at)"
         )
     finally:
         await server.stop()

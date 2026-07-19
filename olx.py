@@ -224,7 +224,9 @@ class OlxClient:
             price=price,
             currency=currency,
             url=offer.get("url") or "",
-            created_at=offer.get("created_time") or offer.get("last_refresh_time"),
+            # Publication time only — do NOT fall back to last_refresh_time,
+            # which is bumped when sellers refresh/bump old ads.
+            created_at=offer.get("created_time"),
             location=self._extract_location(offer.get("location")),
             image_url=self._extract_image(photos),
             description=self._clean_description(offer.get("description")),

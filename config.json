@@ -31,6 +31,7 @@
   },
   "minimum_profit": 1,
   "debug_notify_all": true,
+  "max_listing_age_seconds": 120,
   "stats_interval_seconds": 600,
   "prime_on_start": true,
   "blacklist_keywords": [

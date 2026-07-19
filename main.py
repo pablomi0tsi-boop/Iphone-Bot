@@ -37,6 +37,7 @@ import random
 import signal
 import sys
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -55,6 +56,31 @@ logger = logging.getLogger("phonedealbot")
 DealItem = Tuple[
     Listing, Optional[str], Optional[int], Optional[float], Optional[float], str
 ]
+
+# Default: only notify listings published within the last 2 minutes.
+DEFAULT_MAX_LISTING_AGE_SECONDS = 120.0
+
+
+def parse_listing_published_at(raw: Optional[str]) -> Optional[datetime]:
+    """Parse an OLX ``created_time`` string into an aware :class:`datetime`.
+
+    OLX returns ISO-8601 values such as ``2026-07-19T13:01:35+02:00``. Returns
+    ``None`` when ``raw`` is missing or unparseable.
+    """
+    if not raw:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 # --------------------------------------------------------------------------- #
@@ -90,6 +116,8 @@ class AppConfig:
     # TEMPORARY DEBUG: when True, skip all deal filters and notify on every
     # new listing (model/storage/profit included when detectable).
     debug_notify_all: bool = False
+    # Reject listings whose OLX created_time is older than this many seconds.
+    max_listing_age_seconds: float = DEFAULT_MAX_LISTING_AGE_SECONDS
 
 
 @dataclass
@@ -196,6 +224,12 @@ def load_config(path: str | Path) -> AppConfig:
         prime_on_start=bool(raw.get("prime_on_start", True)),
         price_book=price_book,
         debug_notify_all=bool(raw.get("debug_notify_all", False)),
+        max_listing_age_seconds=_number(
+            raw,
+            "max_listing_age_seconds",
+            DEFAULT_MAX_LISTING_AGE_SECONDS,
+            minimum=0,
+        ),
     )
 
 
@@ -264,6 +298,8 @@ class DealMonitor:
         Returns ``None`` (and the caller records it as seen) when the listing is
         filtered out. A listing is ignored when it:
 
+        * was published more than ``max_listing_age_seconds`` ago (default 2
+          minutes) based on OLX ``created_time``,
         * contains a blacklisted or accessory keyword (swap terms, ``etui``,
           ``bateria``, ``airpods``, ...),
         * has no price or a price of ``0`` (swap/trade offers),
@@ -273,9 +309,10 @@ class DealMonitor:
         * has no configured resale price, or
         * profit is below ``minimum_profit``.
 
-        When ``debug_notify_all`` is enabled, **all** filters are skipped and
-        every listing is returned for notification (model/storage/profit may be
-        ``None`` when undetectable). This is for debugging only.
+        When ``debug_notify_all`` is enabled, deal-quality filters are skipped
+        but the publication-age gate still applies (only freshly published
+        listings notify). Model/storage/profit may be ``None`` when
+        undetectable.
 
         Otherwise every rejection is logged (never a silent ``return None``)
         with OLX id, title, price, detected model/storage, calculated
@@ -299,22 +336,6 @@ class DealMonitor:
             resale - price if resale is not None and price is not None else None
         )
 
-        # TEMPORARY DEBUG: notify on every new listing; no filters / min profit.
-        if self._config.debug_notify_all:
-            logger.info(
-                "DEBUG notify-all | id=%s | title=%r | price=%s | model=%s | "
-                "storage=%s | resale=%s | profit=%s | url=%s",
-                listing.id,
-                listing.title,
-                listing.price,
-                model,
-                storage_gb,
-                resale,
-                profit,
-                listing.url,
-            )
-            return (listing, model, storage_gb, resale, profit, "")
-
         def reject(reason: str) -> None:
             self._log_rejection(
                 listing,
@@ -324,6 +345,50 @@ class DealMonitor:
                 resale=resale,
                 profit=profit,
             )
+
+        # Always enforce freshness from OLX created_time (even in debug mode).
+        now = datetime.now(timezone.utc)
+        published = parse_listing_published_at(listing.created_at)
+        if published is None:
+            age_seconds: Optional[float] = None
+            published_label = listing.created_at
+        else:
+            age_seconds = (now - published.astimezone(timezone.utc)).total_seconds()
+            published_label = published.isoformat()
+        logger.info(
+            "Listing timestamp | id=%s | published_at=%s | now=%s | age_seconds=%s",
+            listing.id,
+            published_label,
+            now.isoformat(),
+            None if age_seconds is None else round(age_seconds, 3),
+        )
+        if published is None:
+            reject("missing publication timestamp")
+            return None
+        max_age = self._config.max_listing_age_seconds
+        if age_seconds is not None and age_seconds > max_age:
+            reject(
+                f"listing older than {max_age:.0f}s "
+                f"(age={age_seconds:.1f}s)"
+            )
+            return None
+
+        # TEMPORARY DEBUG: notify on every fresh listing; no quality filters.
+        if self._config.debug_notify_all:
+            logger.info(
+                "DEBUG notify-all | id=%s | title=%r | price=%s | model=%s | "
+                "storage=%s | resale=%s | profit=%s | published_at=%s | url=%s",
+                listing.id,
+                listing.title,
+                listing.price,
+                model,
+                storage_gb,
+                resale,
+                profit,
+                published_label,
+                listing.url,
+            )
+            return (listing, model, storage_gb, resale, profit, "")
 
         filter_reason = self.matching_filter_reason(listing)
         if filter_reason is not None:
@@ -361,11 +426,12 @@ class DealMonitor:
         """Run the monitor until a stop is requested."""
         logger.info(
             "Starting OLX iPhone deal monitor | minimum_profit=%.2f PLN | "
-            "webhook=%s | db=%s | debug_notify_all=%s",
+            "webhook=%s | db=%s | debug_notify_all=%s | max_listing_age=%ss",
             self._config.minimum_profit,
             "configured" if self._config.webhook_url else "dry-run",
             self._config.database_path,
             self._config.debug_notify_all,
+            self._config.max_listing_age_seconds,
         )
         if self._config.debug_notify_all:
             logger.warning(
