@@ -1,0 +1,19 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# App runtime artifacts
+*.db
+*.db-wal
+*.db-shm
+listings.db*
+demo_*.json
+demo_*.db*
+
+# Local editor/OS
+.DS_Store
+.idea/
+.vscode/
