@@ -176,14 +176,7 @@ class FakeServer:
         if "iphone" not in query or offset > 0:
             return web.json_response({"data": [], "metadata": {"promoted": []}})
         return web.json_response(
-            {
-                "data": sorted(
-                    self.offers,
-                    key=lambda o: o.get("created_time") or "",
-                    reverse=True,
-                ),
-                "metadata": {"promoted": PROMOTED_INDICES},
-            }
+            {"data": self.offers, "metadata": {"promoted": PROMOTED_INDICES}}
         )
 
     async def _webhook(self, request: web.Request) -> web.Response:
