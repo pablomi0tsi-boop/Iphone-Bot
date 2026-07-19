@@ -2,8 +2,10 @@
 
 Production-ready, asyncio-based monitor that watches **OLX** for newly listed
 iPhones, identifies each listing's **model + storage**, matches it against your
-**expected resale price list**, and sends **instant Discord webhook**
-notifications for every profitable listing.
+**expected resale price list**, and sends an **instant Discord webhook**
+notification for **every** new, correctly identified listing — there is no
+minimum-profit threshold; each message shows the resulting **profit or loss**
+(`💰 Zysk/Strata: +X zł` / `-X zł`).
 
 ## Matching logic
 
@@ -28,9 +30,10 @@ A listing is **ignored** when any of these hold:
   `128g`, `256`, `512`, `1tb`, `1 tb`, `1024gb`), or
 - no `resale_prices` entry exists for the detected `model + storage`.
 
-Otherwise the profit is `profit = resale_price − listing_price`, and a Discord
-notification is sent when `profit >= minimum_profit` (default **300 PLN**). Deals
-are delivered **highest-profit first**.
+Otherwise a Discord notification is sent for **every** such listing, showing
+`profit_or_loss = resale_price − listing_price` as `💰 Zysk/Strata: +X zł` (profit)
+or `-X zł` (loss) — **there is no minimum-profit threshold**. Deals are
+delivered **most-profitable first** (a loss can still rank last).
 
 > **Keyword matching notes** (fixed root cause of missed notifications):
 > - `accessory_keywords` are matched against the **title only**, not the
@@ -70,8 +73,9 @@ final line is emitted on shutdown.
   `"256GB"` or `"1TB"` all accepted).
 - Drops paid/**promoted ads** (via OLX `metadata.promoted`).
 - Batched SQLite de-duplication (one query + one commit per poll).
-- Rich Discord embeds with model+storage, listing price, resale price, profit,
-  location and thumbnail. Rate-limit and `429`-aware.
+- Rich Discord embeds with model+storage, listing price, resale price, and a
+  signed profit/loss (`💰 Zysk/Strata: +X zł` / `-X zł`), location and
+  thumbnail. Rate-limit and `429`-aware.
 - "Prime on start" (only on a fresh database) so the existing back-catalogue is
   recorded silently and only genuinely new listings trigger notifications.
 - Graceful shutdown on `SIGINT`/`SIGTERM`.
@@ -140,9 +144,8 @@ Edit `config.json`:
 - `resale_prices` — **your** expected resale prices, `{ "<model>": { "<storage>":
   price } }`. Storage keys accept `"128"`, `"256GB"` or `"1TB"`.
 - `blacklist_keywords` / `accessory_keywords` — listing skipped if any appears
-  in title/description.
-- `minimum_profit` — notify when `resale − price >= minimum_profit` (default
-  `300`).
+  in title/description (accessory keywords are title-only, see note above).
+  There is no profit threshold — every remaining recognized listing notifies.
 - `stats_interval_seconds` — how often to log statistics (default `600`).
 - `prime_on_start`, `discord.rate_limit_seconds`.
 

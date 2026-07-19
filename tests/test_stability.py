@@ -77,14 +77,14 @@ def _write_config(tmp: str, data: dict) -> str:
     return str(path)
 
 
-def test_config_defaults_and_minimum_profit() -> None:
+def test_config_defaults() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         cfg = load_config(_write_config(tmp, _VALID_CONFIG))
-        assert cfg.minimum_profit == 300.0  # documented default
+        assert not hasattr(cfg, "minimum_profit")  # filter removed by design
         assert cfg.poll_interval_seconds == 10
         assert cfg.stats_interval_seconds == 600
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
-    print("PASS: config defaults + minimum_profit default (300)")
+    print("PASS: config defaults (no minimum-profit filter)")
 
 
 def test_config_rejects_invalid_json() -> None:
@@ -184,7 +184,7 @@ async def test_discord_retries_on_timeout() -> None:
 async def _main() -> None:
     await test_db_creates_nested_path()
     await test_db_recovers_from_corruption()
-    test_config_defaults_and_minimum_profit()
+    test_config_defaults()
     test_config_rejects_invalid_json()
     test_config_rejects_bad_values()
     test_config_rejects_bad_resale_prices()

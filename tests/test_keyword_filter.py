@@ -53,7 +53,6 @@ def _monitor() -> DealMonitor:
         pages_per_poll=1,
         search_queries=["iphone 13"],
         database_path=":memory:",
-        minimum_profit=300.0,
         stats_interval_seconds=0.0,
         blacklist_keywords=["icloud", "uszkodzony", "locked", "zamiana"],
         accessory_keywords=["etui", "bateria", "kabel", "case"],

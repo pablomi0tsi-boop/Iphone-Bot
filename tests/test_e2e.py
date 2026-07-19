@@ -82,10 +82,11 @@ def _offer(
 
 # Index 5 is flagged promoted and must be ignored despite looking like a deal.
 FAKE_OFFERS = [
-    # organic deal via STRUCTURED hints: resale 1900 - 1200 = 700 profit
+    # organic deal via STRUCTURED hints: resale 1900 - 1200 = +700 profit
     _offer(2001, "iPhone 13 128GB idealny", 1200,
            model_label="iPhone 13", storage_label="128GB", photos=3, seller="Jan K"),
-    # text-parsed, not profitable: resale(13 Pro Max/256)=3050 - 5000 < 0
+    # text-parsed, a LOSS: resale(13 Pro Max/256)=3050 - 5000 = -1950. There is
+    # no minimum-profit filter, so this still notifies (as a loss).
     _offer(2002, "iPhone 13 Pro Max 256GB", 5000),
     # blacklisted (icloud) even though cheap
     _offer(2003, "iPhone 13 128GB blokada icloud", 500),
@@ -111,17 +112,18 @@ FAKE_OFFERS = [
     # accessory keyword ("bateria") -> ignore even though it parses as a phone
     _offer(2011, "iPhone 13 128GB bateria do wymiany", 400,
            model_label="iPhone 13", storage_label="128GB", photos=3),
-    # below minimum_profit (resale 1900 - 1750 = 150 < 300) -> ignore
+    # small profit (resale 1900 - 1750 = +150): notifies now that there is no
+    # minimum-profit threshold.
     _offer(2012, "iPhone 13 128GB", 1750,
            model_label="iPhone 13", storage_label="128GB", photos=3),
     # REGRESSION: accessory words in the DESCRIPTION of an ordinary phone sale
     # (battery health + bundled extras) must NOT disqualify a real deal.
-    # resale 1900 - 1300 = 600 profit.
+    # resale 1900 - 1300 = +600 profit.
     _offer(2013, "iPhone 13 128GB super stan", 1300,
            description="Bateria 89% kondycji. Dorzucam etui i kabel w zestawie.",
            model_label="iPhone 13", storage_label="128GB", photos=3),
     # REGRESSION: "nieuszkodzony" (NOT damaged) must not match the blacklisted
-    # "uszkodzony" (damaged). resale 2100 - 1800 = 300 profit (== minimum).
+    # "uszkodzony" (damaged). resale 2100 - 1800 = +300 profit.
     _offer(2014, "iPhone 13 256GB nieuszkodzony", 1800,
            description="Telefon calkowicie nieuszkodzony, wszystko sprawne.",
            model_label="iPhone 13", storage_label="256GB", photos=3),
@@ -186,7 +188,6 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         pages_per_poll=1,
         search_queries=["iphone 13"],
         database_path=":memory:",
-        minimum_profit=300.0,
         stats_interval_seconds=0.0,
         blacklist_keywords=[
             "icloud", "blokada", "uszkodzony", "na części",
@@ -230,25 +231,28 @@ async def _run_cycles(
 
 
 async def test_full_matching_pipeline() -> None:
-    """The profitable, non-blacklisted, identifiable organic listings notify
-    (including ones whose description merely mentions battery/accessory
-    words, or "nieuszkodzony"); everything else is filtered; a second cycle
-    de-dupes."""
+    """Every new, correctly identified, non-blacklisted/non-accessory listing
+    notifies -- there is no minimum-profit threshold, so a genuine LOSS (id
+    2002) notifies too, with a signed Zysk/Strata value; everything else is
+    filtered; a second cycle de-dupes."""
     server = FakeServer()
     await server.start()
     try:
         monitor = DealMonitor(_build_config(server, prime=False))
         await _run_cycles(monitor, cycles=2, priming_first_cycle=False)
 
-        assert len(server.webhook_payloads) == 3, (
-            f"expected exactly 3 webhooks, got {len(server.webhook_payloads)}"
+        assert len(server.webhook_payloads) == 5, (
+            f"expected exactly 5 webhooks, got {len(server.webhook_payloads)}"
         )
-        by_profit = {}
+        by_profit_label = {}
         for payload in server.webhook_payloads:
             fields = {f["name"]: f["value"] for f in payload["embeds"][0]["fields"]}
-            by_profit[fields["📈 Expected profit"]] = (payload, fields)
+            by_profit_label[fields["💰 Zysk/Strata"]] = (payload, fields)
 
-        embed, fields = by_profit["700.00 PLN"][0]["embeds"][0], by_profit["700.00 PLN"][1]
+        embed, fields = (
+            by_profit_label["+700.00 zł"][0]["embeds"][0],
+            by_profit_label["+700.00 zł"][1],
+        )
         assert embed["title"] == "🔥 DEAL FOUND", embed["title"]
         assert fields["📱 Model"] == "iPhone 13", fields
         assert fields["💾 Storage"] == "128GB", fields
@@ -256,24 +260,30 @@ async def test_full_matching_pipeline() -> None:
         assert fields["👤 Seller name"] == "Jan K", fields
         assert "Open on OLX" in fields["🔗 Link"], fields
 
-        # id 2013: profit 600 (1900 - 1300) despite "bateria"/"etui"/"kabel"
-        # appearing in the DESCRIPTION.
-        assert "600.00 PLN" in by_profit, by_profit.keys()
+        # id 2002: a LOSS (resale 3050 - price 5000 = -1950) still notifies,
+        # with an explicit minus sign.
+        assert "-1950.00 zł" in by_profit_label, by_profit_label.keys()
 
-        # id 2014: profit 300 (2100 - 1800, == minimum_profit) despite
-        # "nieuszkodzony" appearing in the description.
-        assert "300.00 PLN" in by_profit, by_profit.keys()
+        # id 2012: a small profit (+150) that used to be below the removed
+        # minimum_profit threshold now notifies too.
+        assert "+150.00 zł" in by_profit_label, by_profit_label.keys()
 
-        # Stats counters updated.
-        assert monitor._stats.deals_found == 3, monitor._stats
-        assert monitor._stats.notifications_sent == 3, monitor._stats
+        # id 2013: +600 despite "bateria"/"etui"/"kabel" in the DESCRIPTION.
+        assert "+600.00 zł" in by_profit_label, by_profit_label.keys()
+
+        # id 2014: +300 despite "nieuszkodzony" appearing in the description.
+        assert "+300.00 zł" in by_profit_label, by_profit_label.keys()
+
+        # Stats counters updated (average_profit can be pulled down by a loss).
+        assert monitor._stats.deals_found == 5, monitor._stats
+        assert monitor._stats.notifications_sent == 5, monitor._stats
         assert monitor._stats.average_profit == pytest_approx(
-            (700.0 + 600.0 + 300.0) / 3
+            (700.0 - 1950.0 + 150.0 + 600.0 + 300.0) / 5
         ), monitor._stats
         print(
-            "PASS: full pipeline notifies every valid profitable deal "
-            "(including description-only battery/accessory mentions and "
-            "nieuszkodzony), de-dupes"
+            "PASS: full pipeline notifies EVERY recognized non-blacklisted/"
+            "non-accessory listing regardless of profit sign (no minimum-"
+            "profit threshold), including a genuine loss; de-dupes"
         )
     finally:
         await server.stop()
@@ -290,8 +300,9 @@ def pytest_approx(value: float, tol: float = 1e-6):
 
 
 async def test_blacklist_and_unknowns_are_ignored() -> None:
-    """Blacklisted / unknown-storage / unknown-model / promoted / unprofitable
-    listings never notify (verified via evaluate())."""
+    """Blacklisted / unknown-storage / unknown-model / promoted listings never
+    notify; there is no profit threshold, so an outright LOSS still notifies
+    (verified via evaluate())."""
     server = FakeServer()
     await server.start()
     try:
@@ -303,7 +314,8 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         # Promoted 2006 filtered by the client already.
         assert "2006" not in by_id, "promoted listing should be filtered by client"
         assert monitor.evaluate(by_id["2001"]) is not None       # good deal
-        assert monitor.evaluate(by_id["2002"]) is None           # not profitable
+        deal_2002 = monitor.evaluate(by_id["2002"])
+        assert deal_2002 is not None and deal_2002[4] == -1950.0  # LOSS, still notifies
         assert monitor.evaluate(by_id["2003"]) is None           # blacklisted
         assert monitor.evaluate(by_id["2004"]) is None           # no storage
         assert monitor.evaluate(by_id["2005"]) is None           # unknown model
@@ -312,7 +324,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         assert monitor.evaluate(by_id["2009"]) is None           # no photos
         assert monitor.evaluate(by_id["2010"]) is None           # business account
         assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
-        assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
+        assert monitor.evaluate(by_id["2012"]) is not None        # small profit, no threshold now
         # REGRESSION: accessory words in the description of a real phone sale
         # (battery %, bundled etui/kabel) must NOT be treated as an
         # accessory-only listing.
@@ -323,9 +335,10 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         assert monitor.evaluate(by_id["2015"]) is None
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
-            "no-photos / business / accessory (title) / below-min-profit ignored; "
-            "description-only battery/accessory mentions and negated keywords "
-            "(nieuszkodzony) no longer false-positive"
+            "no-photos / business / accessory (title) ignored; a genuine LOSS "
+            "still notifies (no minimum-profit threshold); description-only "
+            "battery/accessory mentions and negated keywords (nieuszkodzony) "
+            "no longer false-positive"
         )
     finally:
         await server.stop()
