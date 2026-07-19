@@ -148,18 +148,37 @@ class OlxClient:
         per_page = max(1, min(limit, 40))
         collected: List[Listing] = []
         seen_ids: Set[str] = set()
+        promoted_skipped = 0
+        parse_errors = 0
+        raw_total = 0
 
         for page in range(max(1, pages)):
             offers, promoted = await self._fetch_page(query, per_page, page * per_page)
+            raw_total += len(offers)
             for index, offer in enumerate(offers):
                 if not self._include_promoted and index in promoted:
+                    promoted_skipped += 1
                     continue
                 try:
                     listing = self._parse_offer(offer)
                 except Exception as exc:  # noqa: BLE001 - skip one bad offer only
-                    logger.debug("Skipping malformed OLX offer: %s", exc)
+                    parse_errors += 1
+                    logger.warning(
+                        "[%s] parse error on OLX offer id=%s: %s",
+                        query,
+                        offer.get("id") if isinstance(offer, dict) else "?",
+                        exc,
+                    )
                     continue
-                if listing is None or listing.id in seen_ids:
+                if listing is None:
+                    parse_errors += 1
+                    logger.warning(
+                        "[%s] OLX offer missing an id, skipped: %r",
+                        query,
+                        offer if isinstance(offer, dict) else offer,
+                    )
+                    continue
+                if listing.id in seen_ids:
                     continue
                 seen_ids.add(listing.id)
                 collected.append(listing)
@@ -167,7 +186,15 @@ class OlxClient:
             if len(offers) < per_page:
                 break
 
-        logger.debug("OLX query %r returned %d organic listing(s)", query, len(collected))
+        logger.info(
+            "[%s] OLX search summary: %d raw offer(s), %d promoted skipped, "
+            "%d parse error(s), %d organic listing(s) returned",
+            query,
+            raw_total,
+            promoted_skipped,
+            parse_errors,
+            len(collected),
+        )
         return collected
 
     async def _fetch_page(
@@ -191,15 +218,35 @@ class OlxClient:
             headers=self._headers,
             timeout=timeout,
         ) as response:
+            request_url = response.request_info.url
+            logger.info(
+                "[%s] OLX request: GET %s -> HTTP %d",
+                query,
+                request_url,
+                response.status,
+            )
             response.raise_for_status()
             payload = await response.json(content_type=None)
 
         if not isinstance(payload, dict):
+            logger.warning(
+                "[%s] OLX response was not a JSON object (got %s); treating as "
+                "0 offers",
+                query,
+                type(payload).__name__,
+            )
             return [], set()
         offers = payload.get("data", []) or []
         metadata = payload.get("metadata") or {}
         promoted_raw = metadata.get("promoted") or []
         promoted = {int(i) for i in promoted_raw if isinstance(i, (int, float))}
+        logger.info(
+            "[%s] OLX page offset=%d: %d offer(s) in response, %d flagged promoted",
+            query,
+            offset,
+            len(offers),
+            len(promoted),
+        )
         return offers, promoted
 
     def _parse_offer(self, offer: Dict[str, Any]) -> Optional[Listing]:

@@ -44,6 +44,29 @@ Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
   hang exit; all background tasks are cancelled and the aiohttp session closes
   via `async with`.
 
+### Diagnosing "listings checked: 0" after startup
+If `STATS` keeps showing `listings checked: 0` (and no `[query] fetched N
+offer(s)...` lines appear at all), the fetch is failing before it ever reaches
+`DealMonitor._process_listings` — check for `[query] poll failed (attempt N):
+...` WARNING lines (network/HTTP error, backing off) first. `olx.py` and
+`main.py` log every stage at INFO by default (no config needed):
+- `olx: [query] OLX request: GET <full URL incl. query string> -> HTTP <code>`
+- `olx: [query] OLX page offset=N: X offer(s) in response, Y flagged promoted`
+- `olx: [query] OLX search summary: X raw, Y promoted skipped, Z parse
+  error(s), W organic listing(s) returned`
+- `phonedealbot: [query] fetched N offer(s), M already seen (deduped), K new`
+  (logged even when `K == 0`, so silence here — not just a 0 stat — means the
+  loop for that query isn't running at all, e.g. crashed on startup).
+Per-listing rejection reasons from `DealMonitor.evaluate` are logged at DEBUG
+(`[reject] id=... -> <reason>`); raise the `phonedealbot` logger to DEBUG to
+see them (`logging.getLogger("phonedealbot").setLevel(logging.DEBUG)`).
+`listings_checked` only increments for offers that are BOTH fetched from OLX
+AND not already in `seen_listings` — so it can legitimately stay near-flat for
+a while on a normal, working bot if nothing new has appeared yet (OLX's
+top-40 for a query is often near-static minute to minute); it should never
+stay at exactly 0 while `fetched N offer(s)...` lines show `N > 0` and
+`already seen (deduped)` is less than `N`.
+
 ### Gotchas
 - `discord.py` here is a **local module** (webhook sender), not the third-party
   `discord.py` package. Do not `pip install discord.py`; it would shadow this

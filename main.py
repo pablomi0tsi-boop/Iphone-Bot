@@ -285,12 +285,16 @@ class DealMonitor:
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
         if self.has_filtered_keyword(listing):
+            self._log_rejection(listing, "blacklisted/accessory keyword")
             return None
         if listing.price is None or listing.price <= 0:
+            self._log_rejection(listing, f"no/zero price (price={listing.price!r})")
             return None
         if listing.photo_count <= 0:
+            self._log_rejection(listing, "no photos attached")
             return None
         if listing.is_business is True:
+            self._log_rejection(listing, "business/shop account")
             return None
 
         spec = detect_phone(
@@ -300,17 +304,46 @@ class DealMonitor:
             storage_hint=listing.storage_hint,
         )
         if not spec.is_confident:
+            self._log_rejection(
+                listing,
+                f"model/storage not confidently identified "
+                f"(model={spec.model!r}, storage_gb={spec.storage_gb!r})",
+            )
             return None
         assert spec.model is not None and spec.storage_gb is not None
 
         resale = self._config.price_book.lookup(spec.model, spec.storage_gb)
         if resale is None:
+            self._log_rejection(
+                listing,
+                f"no configured resale_prices entry for "
+                f"{spec.model!r} / {spec.storage_gb}GB",
+            )
             return None
 
         profit = resale - listing.price
         if profit < self._config.minimum_profit:
+            self._log_rejection(
+                listing,
+                f"profit {profit:.2f} PLN below minimum_profit "
+                f"{self._config.minimum_profit:.2f} PLN "
+                f"(resale={resale:.2f}, price={listing.price:.2f})",
+            )
             return None
         return (listing, spec.model, spec.storage_gb, resale, profit, "")
+
+    @staticmethod
+    def _log_rejection(listing: Listing, reason: str) -> None:
+        """Log why a listing was filtered out (DEBUG; enable with
+        ``logging.getLogger("phonedealbot").setLevel(logging.DEBUG)`` or
+        ``PYTHONLOG=DEBUG`` for full per-listing detail)."""
+        logger.debug(
+            "[reject] id=%s title=%r price=%s -> %s",
+            listing.id,
+            listing.title,
+            listing.price,
+            reason,
+        )
 
     # -- lifecycle ---------------------------------------------------------- #
     async def run(self) -> None:
@@ -459,11 +492,23 @@ class DealMonitor:
     ) -> None:
         """Match, cost and enqueue new listings for a single poll result."""
         if not listings:
+            logger.info(
+                "[%s] OLX returned 0 offers this poll (see OLX request/response "
+                "log lines above for URL + HTTP status)",
+                query,
+            )
             return
 
         ids = [listing.id for listing in listings]
         already_seen = await self._db.seen_subset(ids)
         new_listings = [listing for listing in listings if listing.id not in already_seen]
+        logger.info(
+            "[%s] fetched %d offer(s), %d already seen (deduped), %d new",
+            query,
+            len(listings),
+            len(already_seen),
+            len(new_listings),
+        )
         if not new_listings:
             return
 
