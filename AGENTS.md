@@ -56,12 +56,19 @@ Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
   explicit GB/TB unit and must be unambiguous, else the listing is ignored.
 - `resale_prices` in `config.json` are the user's real PLN values. Prices drive
   buy decisions, so never invent them.
-- Deal filtering (in `DealMonitor.evaluate`) ignores: blacklist keyword hits
-  (incl. swap terms), `price <= 0`, listings with no photos, business-account
-  sellers (`Listing.is_business is True`), and unconfident model/storage.
-  Promoted ads are already dropped in `OlxClient.search`.
+- Deal filtering (in `DealMonitor.evaluate`) ignores: blacklist + accessory
+  keyword hits, `price <= 0`, no photos, business-account sellers
+  (`Listing.is_business is True`), unconfident model/storage, and
+  `profit < minimum_profit` (default 300, `>=` to notify). Promoted ads are
+  dropped in `OlxClient.search`.
 - Swap listings report `price = 0` (and usually a swap keyword), so they are
   filtered by BOTH the zero-price rule and the swap blacklist words.
+- Some `accessory_keywords` (`bateria`, `ekran`, `wyświetlacz`, `szkło`, ...)
+  also occur in genuine phone listings, so they lower recall (~30% in live
+  sampling). This is intentional per spec and tunable in `config.json`; do not
+  silently remove them.
+- Stats (`Stats` + `_stats_loop`) log every `stats_interval_seconds` (default
+  600s) and once on shutdown.
 - Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
   index lag (server-side, uncontrollable). "Within seconds" is best-effort, not
   guaranteed.

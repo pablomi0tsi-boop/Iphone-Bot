@@ -14,20 +14,37 @@ A listing is **ignored** when any of these hold:
   words (`zamienię`, `zamiana`, `swap`, `wymiana`, `trade`) and condition/lock
   words (`icloud`, `blokada`, `mdm`, `na części`, `uszkodzony`, `zbity`,
   `czytaj opis`, `locked`, `for parts`),
+- its title/description contains an `accessory_keywords` term (`etui`, `case`,
+  `pokrowiec`, `szkło`, `szybka`, `wyświetlacz`, `ekran`, `lcd`, `oled`,
+  `bateria`, `taśma`, `płyta`, `części`, `housing`, `obudowa`, `ładowarka`,
+  `kabel`, `airpods`, `apple watch`),
 - its **price is `0`** (or missing),
 - it has **no photos** attached,
 - the seller is a **business account** (when OLX reports the seller type),
 - the **model or storage cannot be determined confidently** (structured OLX
   attributes `phonemodel` / `builtinmemory_phones` first, then unambiguous
-  title/description parsing), or
+  title/description parsing; storage understands `128`, `128gb`, `128 gb`,
+  `128g`, `256`, `512`, `1tb`, `1 tb`, `1024gb`), or
 - no `resale_prices` entry exists for the detected `model + storage`.
 
 Otherwise the profit is `profit = resale_price − listing_price`, and a Discord
-notification is sent when `profit > min_profit` (default **1 PLN**). Deals are
-delivered **highest-profit first**.
+notification is sent when `profit >= minimum_profit` (default **300 PLN**). Deals
+are delivered **highest-profit first**.
+
+> ⚠️ Some `accessory_keywords` (`bateria`, `ekran`, `wyświetlacz`, `szkło`, ...)
+> also appear in legitimate phone listings ("bateria 100%"), so they reduce
+> recall (measured ~30% fewer deals in live sampling). They are matched in
+> title **and** description as requested; remove specific words from
+> `accessory_keywords` in `config.json` if you prefer higher recall.
 
 > The `resale_prices` in `config.json` hold your configured PLN resale values;
 > keep them up to date as the market moves.
+
+## Statistics
+
+Every `stats_interval_seconds` (default **600s / 10 min**) a cumulative line is
+logged: listings checked, deals found, notifications sent, and average profit. A
+final line is emitted on shutdown.
 
 ## Features
 
@@ -111,8 +128,11 @@ Edit `config.json`:
   listing, independently of the query.
 - `resale_prices` — **your** expected resale prices, `{ "<model>": { "<storage>":
   price } }`. Storage keys accept `"128"`, `"256GB"` or `"1TB"`.
-- `blacklist_keywords` — listing skipped if any appears in title/description.
-- `min_profit` — notify when `resale − price` exceeds this (default `1`).
+- `blacklist_keywords` / `accessory_keywords` — listing skipped if any appears
+  in title/description.
+- `minimum_profit` — notify when `resale − price >= minimum_profit` (default
+  `300`).
+- `stats_interval_seconds` — how often to log statistics (default `600`).
 - `prime_on_start`, `discord.rate_limit_seconds`.
 
 ## Run

@@ -79,10 +79,27 @@ class AppConfig:
     pages_per_poll: int
     search_queries: List[str]
     database_path: str
-    min_profit: float
+    minimum_profit: float
+    stats_interval_seconds: float
     blacklist_keywords: List[str]
+    accessory_keywords: List[str]
     prime_on_start: bool
     price_book: PriceBook
+
+
+@dataclass
+class Stats:
+    """Rolling counters logged periodically for operational visibility."""
+
+    listings_checked: int = 0
+    deals_found: int = 0
+    notifications_sent: int = 0
+    total_profit: float = 0.0
+
+    @property
+    def average_profit(self) -> float:
+        """Mean expected profit across deals found (0 when none)."""
+        return self.total_profit / self.deals_found if self.deals_found else 0.0
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -136,9 +153,13 @@ def load_config(path: str | Path) -> AppConfig:
         pages_per_poll=max(1, int(olx.get("pages_per_poll", 1))),
         search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
-        min_profit=float(raw.get("min_profit", 1)),
+        minimum_profit=float(raw.get("minimum_profit", raw.get("min_profit", 300))),
+        stats_interval_seconds=float(raw.get("stats_interval_seconds", 600)),
         blacklist_keywords=[
             str(k).lower() for k in raw.get("blacklist_keywords", [])
+        ],
+        accessory_keywords=[
+            str(k).lower() for k in raw.get("accessory_keywords", [])
         ],
         prime_on_start=bool(raw.get("prime_on_start", True)),
         price_book=price_book,
@@ -156,6 +177,7 @@ class DealMonitor:
         self._db = ListingDatabase(config.database_path)
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[DealItem] = asyncio.Queue()
+        self._stats = Stats()
 
     def request_stop(self) -> None:
         """Signal every polling loop to finish promptly and exit."""
@@ -163,28 +185,36 @@ class DealMonitor:
         self._stop_event.set()
 
     # -- matching ----------------------------------------------------------- #
-    def is_blacklisted(self, listing: Listing) -> bool:
-        """Return ``True`` if the listing text contains a blacklisted keyword."""
+    def has_filtered_keyword(self, listing: Listing) -> bool:
+        """Return ``True`` if the listing text contains a blacklisted or
+        accessory keyword (checked against both title and description)."""
         text = listing.search_text
-        return any(keyword in text for keyword in self._config.blacklist_keywords)
+        return any(
+            keyword in text
+            for keyword in self._config.blacklist_keywords
+        ) or any(
+            keyword in text
+            for keyword in self._config.accessory_keywords
+        )
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
         """Evaluate a listing; return a :data:`DealItem` if it is a deal.
 
         Returns ``None`` (and the caller records it as seen) when the listing is
-        filtered out. A listing is ignored when it:
+        filtered out.         A listing is ignored when it:
 
-        * contains a blacklisted keyword (incl. swap terms like ``zamiana``),
+        * contains a blacklisted or accessory keyword (swap terms, ``etui``,
+          ``bateria``, ``airpods``, ...),
         * has no price or a price of ``0`` (swap/trade offers),
         * has no photos attached,
         * is posted by a business account (when OLX reports the seller type),
         * cannot be identified (model/storage) confidently,
         * has no configured resale price, or
-        * is not profitable enough.
+        * profit is below ``minimum_profit``.
 
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
-        if self.is_blacklisted(listing):
+        if self.has_filtered_keyword(listing):
             return None
         if listing.price is None or listing.price <= 0:
             return None
@@ -208,7 +238,7 @@ class DealMonitor:
             return None
 
         profit = resale - listing.price
-        if profit <= self._config.min_profit:
+        if profit < self._config.minimum_profit:
             return None
         return (listing, spec.model, spec.storage_gb, resale, profit, "")
 
@@ -265,6 +295,7 @@ class DealMonitor:
             )
 
             worker = asyncio.create_task(self._notifier_worker(notifier))
+            stats_task = asyncio.create_task(self._stats_loop())
             loops = [
                 asyncio.create_task(
                     self._run_query_loop(query, olx_client, primed=start_primed)
@@ -279,7 +310,9 @@ class DealMonitor:
                 await asyncio.gather(*loops, return_exceptions=True)
                 await self._queue.join()
                 worker.cancel()
-                await asyncio.gather(worker, return_exceptions=True)
+                stats_task.cancel()
+                await asyncio.gather(worker, stats_task, return_exceptions=True)
+                self._log_stats()  # final summary on shutdown
                 await self._db.close()
 
     async def _run_query_loop(
@@ -335,6 +368,8 @@ class DealMonitor:
         if not new_listings:
             return
 
+        self._stats.listings_checked += len(new_listings)
+
         records = []
         deals: List[DealItem] = []
         for listing in new_listings:
@@ -342,6 +377,8 @@ class DealMonitor:
             notified = deal is not None and not priming
             if notified:
                 assert deal is not None
+                self._stats.deals_found += 1
+                self._stats.total_profit += deal[4]
                 # Attach the originating query for logging.
                 deals.append(deal[:5] + (query,))
             records.append(
@@ -383,6 +420,7 @@ class DealMonitor:
                     storage_gb=storage_gb,
                 )
                 if sent:
+                    self._stats.notifications_sent += 1
                     logger.info(
                         "DEAL [%s] %s %dGB | price=%s | resale=%.2f | profit=%.2f | %s",
                         query,
@@ -399,6 +437,29 @@ class DealMonitor:
                 logger.warning("Notification delivery failed: %s", exc)
             finally:
                 self._queue.task_done()
+
+    async def _stats_loop(self) -> None:
+        """Log rolling statistics every ``stats_interval_seconds``."""
+        interval = self._config.stats_interval_seconds
+        if interval <= 0:
+            return
+        while not self._stop_event.is_set():
+            await self._sleep_or_stop(interval)
+            if self._stop_event.is_set():
+                break
+            self._log_stats()
+
+    def _log_stats(self) -> None:
+        """Emit a single cumulative statistics line."""
+        stats = self._stats
+        logger.info(
+            "STATS (cumulative) | listings checked: %d | deals found: %d | "
+            "notifications sent: %d | average profit: %.2f PLN",
+            stats.listings_checked,
+            stats.deals_found,
+            stats.notifications_sent,
+            stats.average_profit,
+        )
 
     async def _sleep_or_stop(self, seconds: float) -> None:
         """Sleep for ``seconds`` unless a stop is requested first."""
