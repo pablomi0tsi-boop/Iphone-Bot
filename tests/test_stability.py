@@ -15,6 +15,7 @@ import asyncio
 import json
 import sys
 import tempfile
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import aiohttp
@@ -23,7 +24,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from database import ListingDatabase  # noqa: E402
 from discord import DiscordNotifier  # noqa: E402
-from main import load_config  # noqa: E402
+from main import (  # noqa: E402
+    listing_age_seconds,
+    load_config,
+    parse_listing_published_at,
+)
 from olx import Listing  # noqa: E402
 
 
@@ -87,6 +92,28 @@ def test_config_defaults_and_minimum_profit() -> None:
         assert cfg.max_listing_age_seconds == 120.0  # 2-minute freshness window
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
     print("PASS: config defaults + minimum_profit default (300)")
+
+
+def test_listing_age_timezone_handling() -> None:
+    """Age must convert +02:00 publication times to UTC before subtracting.
+
+    A naive wall-clock subtract of ``15:00+02:00`` vs ``13:01 UTC`` looks like
+    ~2 hours; the real age is ~1 minute. Stripping tzinfo reproduces the bug.
+    """
+    published = parse_listing_published_at("2026-07-19T15:00:00+02:00")
+    assert published is not None
+    assert published.utcoffset() == timedelta(hours=2)
+
+    now = datetime(2026, 7, 19, 13, 1, 0, tzinfo=timezone.utc)
+    age = listing_age_seconds(published, now)
+    assert abs(age - 60.0) < 1e-6, f"expected ~60s age, got {age}"
+
+    # The incorrect naive strip would report ~-2h or ~+2h depending on order.
+    naive_skew = (
+        now.replace(tzinfo=None) - published.replace(tzinfo=None)
+    ).total_seconds()
+    assert abs(naive_skew - age) == timedelta(hours=2).total_seconds()
+    print("PASS: listing age converts +02:00 to UTC (no 2h skew)")
 
 
 def test_config_rejects_invalid_json() -> None:
@@ -187,6 +214,7 @@ async def _main() -> None:
     await test_db_creates_nested_path()
     await test_db_recovers_from_corruption()
     test_config_defaults_and_minimum_profit()
+    test_listing_age_timezone_handling()
     test_config_rejects_invalid_json()
     test_config_rejects_bad_values()
     test_config_rejects_bad_resale_prices()

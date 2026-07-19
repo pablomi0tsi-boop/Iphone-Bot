@@ -348,13 +348,16 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             assert "model=" in match and "storage=" in match
             assert "resale=" in match and "profit=" in match
 
-        # Freshness debug log must include published_at and now for every listing.
+        # Freshness debug log must include both datetime objects + UTC forms.
         age_logs = [
             msg for msg in log_capture.messages if msg.startswith("Listing timestamp |")
         ]
         assert len(age_logs) >= len(expected_reasons), age_logs
         for msg in age_logs:
-            assert "published_at=" in msg and "now=" in msg, msg
+            assert "published=" in msg and "now=" in msg, msg
+            assert "offset=" in msg, msg
+            if "age_seconds=None" not in msg:
+                assert "published_utc=" in msg and "now_utc=" in msg, msg
 
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "

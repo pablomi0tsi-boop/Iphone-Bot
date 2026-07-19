@@ -65,7 +65,9 @@ def parse_listing_published_at(raw: Optional[str]) -> Optional[datetime]:
     """Parse an OLX ``created_time`` string into an aware :class:`datetime`.
 
     OLX returns ISO-8601 values such as ``2026-07-19T13:01:35+02:00``. Returns
-    ``None`` when ``raw`` is missing or unparseable.
+    ``None`` when ``raw`` is missing or unparseable. The returned datetime
+    always carries an explicit ``tzinfo`` (UTC assumed only if the input had
+    no offset).
     """
     if not raw:
         return None
@@ -79,8 +81,26 @@ def parse_listing_published_at(raw: Optional[str]) -> Optional[datetime]:
     except ValueError:
         return None
     if parsed.tzinfo is None:
+        # OLX normally includes an offset; treat bare timestamps as UTC.
         parsed = parsed.replace(tzinfo=timezone.utc)
     return parsed
+
+
+def listing_age_seconds(published: datetime, now: datetime) -> float:
+    """Return how many seconds ``published`` is before ``now``.
+
+    Both arguments must be timezone-aware. Each is converted to UTC **before**
+    subtraction so a Warsaw ``+02:00`` publication time is never compared as if
+    it were a UTC wall clock (which would skew age by ~2 hours in summer).
+    """
+    if published.tzinfo is None or now.tzinfo is None:
+        raise ValueError(
+            "listing_age_seconds requires timezone-aware datetimes "
+            f"(published.tzinfo={published.tzinfo!r}, now.tzinfo={now.tzinfo!r})"
+        )
+    published_utc = published.astimezone(timezone.utc)
+    now_utc = now.astimezone(timezone.utc)
+    return (now_utc - published_utc).total_seconds()
 
 
 # --------------------------------------------------------------------------- #
@@ -347,21 +367,46 @@ class DealMonitor:
             )
 
         # Always enforce freshness from OLX created_time (even in debug mode).
+        # Normalise both sides to UTC before subtracting — OLX timestamps carry
+        # a local offset (e.g. +02:00) while ``now`` is taken in UTC, and a
+        # naive wall-clock subtract would skew age by that offset (~2h).
         now = datetime.now(timezone.utc)
         published = parse_listing_published_at(listing.created_at)
-        if published is None:
-            age_seconds: Optional[float] = None
-            published_label = listing.created_at
+        age_seconds: Optional[float] = None
+        published_utc: Optional[datetime] = None
+        now_utc = now.astimezone(timezone.utc)
+        if published is not None:
+            published_utc = published.astimezone(timezone.utc)
+            logger.info(
+                "Listing timestamp | id=%s | published=%r tz=%s offset=%s | "
+                "now=%r tz=%s offset=%s | published_utc=%s | now_utc=%s",
+                listing.id,
+                published,
+                published.tzinfo,
+                published.utcoffset(),
+                now,
+                now.tzinfo,
+                now.utcoffset(),
+                published_utc.isoformat(),
+                now_utc.isoformat(),
+            )
+            age_seconds = listing_age_seconds(published, now)
+            logger.info(
+                "Listing age | id=%s | age_seconds=%s",
+                listing.id,
+                round(age_seconds, 3),
+            )
         else:
-            age_seconds = (now - published.astimezone(timezone.utc)).total_seconds()
-            published_label = published.isoformat()
-        logger.info(
-            "Listing timestamp | id=%s | published_at=%s | now=%s | age_seconds=%s",
-            listing.id,
-            published_label,
-            now.isoformat(),
-            None if age_seconds is None else round(age_seconds, 3),
-        )
+            logger.info(
+                "Listing timestamp | id=%s | published=%r | now=%r tz=%s "
+                "offset=%s | now_utc=%s | age_seconds=None",
+                listing.id,
+                listing.created_at,
+                now,
+                now.tzinfo,
+                now.utcoffset(),
+                now_utc.isoformat(),
+            )
         if published is None:
             reject("missing publication timestamp")
             return None
@@ -377,7 +422,7 @@ class DealMonitor:
         if self._config.debug_notify_all:
             logger.info(
                 "DEBUG notify-all | id=%s | title=%r | price=%s | model=%s | "
-                "storage=%s | resale=%s | profit=%s | published_at=%s | url=%s",
+                "storage=%s | resale=%s | profit=%s | published_utc=%s | url=%s",
                 listing.id,
                 listing.title,
                 listing.price,
@@ -385,7 +430,7 @@ class DealMonitor:
                 storage_gb,
                 resale,
                 profit,
-                published_label,
+                published_utc.isoformat() if published_utc else None,
                 listing.url,
             )
             return (listing, model, storage_gb, resale, profit, "")
