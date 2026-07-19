@@ -43,7 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 
-from database import ListingDatabase
+from database import ListingDatabase, SQLITE_INSTRUMENTATION_VERSION
 from discord import DiscordNotifier
 from olx import (
     Listing,
@@ -633,6 +633,14 @@ class DealMonitor:
                 "listing will trigger a Discord notification"
             )
         await self._db.connect()
+        logger.info(
+            "SQLite absolute database path | absolute_path=%s | configured=%s | "
+            "instrumentation=%s | row_count=%d",
+            self._db.absolute_path,
+            self._config.database_path,
+            SQLITE_INSTRUMENTATION_VERSION,
+            await self._db.count(),
+        )
 
         # Always run a silent prime pass on startup when configured — even if
         # the DB already has rows from a previous run. Every listing currently

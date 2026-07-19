@@ -82,13 +82,17 @@ async def test_db_blocks_insert_before_unseen_and_logs_contains() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         path = Path(tmp) / "listings.db"
         db = ListingDatabase(str(path))
-        await db.connect()
         capture = Capture()
         db_logger = logging.getLogger("database")
+        app_logger = logging.getLogger("phonedealbot")
         db_logger.addHandler(capture)
+        app_logger.addHandler(capture)
         previous = db_logger.level
+        previous_app = app_logger.level
         db_logger.setLevel(logging.INFO)
+        app_logger.setLevel(logging.INFO)
         try:
+            await db.connect()
             await db.mark_seen("seed", source="olx", title="seed", notified=False)
             db.begin_poll("test-query")
             try:
@@ -113,7 +117,9 @@ async def test_db_blocks_insert_before_unseen_and_logs_contains() -> None:
                 db.end_poll()
         finally:
             db_logger.removeHandler(capture)
+            app_logger.removeHandler(capture)
             db_logger.setLevel(previous)
+            app_logger.setLevel(previous_app)
             await db.close()
 
         contains_logs = [m for m in capture.messages if m.startswith("database.contains |")]
@@ -121,9 +127,13 @@ async def test_db_blocks_insert_before_unseen_and_logs_contains() -> None:
         seed_log = next(m for m in contains_logs if "id=seed" in m)
         fresh_log = next(m for m in contains_logs if "id=fresh" in m)
         assert f"path={path}" in seed_log or str(path) in seed_log
+        assert "absolute_path=" in seed_log
         assert "row_count=" in seed_log
         assert "existed_before_current_poll=True" in seed_log
         assert "existed_before_current_poll=False" in fresh_log
+        assert any(
+            "SQLite instrumentation ACTIVE" in m for m in capture.messages
+        ), capture.messages
         insert_logs = [m for m in capture.messages if m.startswith("database.INSERT |")]
         assert any("id=fresh" in m and "timestamp=" in m for m in insert_logs), (
             capture.messages

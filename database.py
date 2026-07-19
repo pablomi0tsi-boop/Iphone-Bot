@@ -20,12 +20,32 @@ from typing import Iterable, Optional, Sequence, Set, Tuple
 import aiosqlite
 
 logger = logging.getLogger(__name__)
+# Also emit on the app logger so SQLite diagnostics are visible even when the
+# process was started under a filtered handler setup, and so operators scanning
+# for ``phonedealbot:`` lines cannot miss them.
+app_logger = logging.getLogger("phonedealbot")
+
+# Bump this when changing instrumentation so startup logs prove the loaded code.
+SQLITE_INSTRUMENTATION_VERSION = "sqlite-instrumentation-v2"
+
+
+def _sqlite_log(message: str, *args: object) -> None:
+    """Log SQLite diagnostics to both the module and app loggers."""
+    logger.info(message, *args)
+    app_logger.info(message, *args)
+
+
+def _sqlite_error(message: str, *args: object) -> None:
+    """Log SQLite errors to both the module and app loggers."""
+    logger.error(message, *args)
+    app_logger.error(message, *args)
+
 
 # A row queued for bulk insertion:
 #   (listing_id, source, title, price, url, notified)
 SeenRecord = Tuple[str, str, Optional[str], Optional[float], Optional[str], bool]
 
-__all__ = ["ListingDatabase"]
+__all__ = ["ListingDatabase", "SQLITE_INSTRUMENTATION_VERSION"]
 
 
 class ListingDatabase:
@@ -61,6 +81,13 @@ class ListingDatabase:
         """Configured SQLite path (file path or ``:memory:``)."""
         return self._path
 
+    @property
+    def absolute_path(self) -> str:
+        """Absolute filesystem path (or ``:memory:``)."""
+        if self._path == ":memory:":
+            return ":memory:"
+        return os.path.abspath(self._path)
+
     async def connect(self) -> None:
         """Open the connection and ensure the schema exists.
 
@@ -78,15 +105,29 @@ class ListingDatabase:
             # once. In-memory databases cannot be corrupt, so re-raise those.
             if self._path == ":memory:":
                 raise
-            logger.error(
+            _sqlite_error(
                 "Database at %s is unusable (%s); quarantining and recreating",
-                self._path,
+                self.absolute_path,
                 exc,
             )
             await self._safe_close()
             self._quarantine_corrupt_files()
             await self._open_and_init()
-        logger.info("Connected to SQLite database at %s", self._path)
+        row_count = await self.count()
+        _sqlite_log(
+            "SQLite instrumentation ACTIVE | version=%s | path=%s | "
+            "absolute_path=%s | row_count=%d",
+            SQLITE_INSTRUMENTATION_VERSION,
+            self._path,
+            self.absolute_path,
+            row_count,
+        )
+        _sqlite_log(
+            "Connected to SQLite database at %s (absolute_path=%s, row_count=%d)",
+            self._path,
+            self.absolute_path,
+            row_count,
+        )
 
     def _ensure_parent_dir(self) -> None:
         """Create the database's parent directory when it does not exist."""
@@ -166,9 +207,11 @@ class ListingDatabase:
         self._poll_label = label or None
         self._poll_baseline = None
         self._inserts_allowed = False
-        logger.info(
-            "database.poll_begin | path=%s | label=%s | inserts_allowed=False",
+        _sqlite_log(
+            "database.poll_begin | path=%s | absolute_path=%s | label=%s | "
+            "inserts_allowed=False",
             self._path,
+            self.absolute_path,
             label or None,
         )
 
@@ -180,20 +223,22 @@ class ListingDatabase:
         """
         self._poll_baseline = set(baseline_seen_ids)
         self._inserts_allowed = True
-        logger.info(
-            "database.unseen_computed | path=%s | label=%s | "
+        _sqlite_log(
+            "database.unseen_computed | path=%s | absolute_path=%s | label=%s | "
             "baseline_seen_count=%d | inserts_allowed=True | "
             "inserts_before_unseen_calc=False",
             self._path,
+            self.absolute_path,
             self._poll_label,
             len(self._poll_baseline),
         )
 
     def end_poll(self) -> None:
         """Clear poll baseline / gate after the poll finishes."""
-        logger.info(
-            "database.poll_end | path=%s | label=%s",
+        _sqlite_log(
+            "database.poll_end | path=%s | absolute_path=%s | label=%s",
             self._path,
+            self.absolute_path,
             self._poll_label,
         )
         self._poll_baseline = None
@@ -204,16 +249,18 @@ class ListingDatabase:
         """Log (and refuse) INSERT attempted before unseen calculation."""
         if self._inserts_allowed:
             return
-        logger.error(
-            "database.INSERT_BEFORE_UNSEEN | path=%s | id=%s | label=%s | "
+        _sqlite_error(
+            "database.INSERT_BEFORE_UNSEEN | path=%s | absolute_path=%s | "
+            "id=%s | label=%s | "
             "bug=INSERT attempted before unseen calculation — blocked",
             self._path,
+            self.absolute_path,
             listing_id,
             self._poll_label,
         )
         raise RuntimeError(
             f"SQLite INSERT of {listing_id!r} attempted before unseen "
-            f"calculation (db={self._path}, poll={self._poll_label!r})"
+            f"calculation (db={self.absolute_path}, poll={self._poll_label!r})"
         )
 
     async def _exists(self, listing_id: str) -> bool:
@@ -244,10 +291,12 @@ class ListingDatabase:
             # No active poll baseline (e.g. debug_listing one-shot) — fall back
             # to the live existence check so the field is still populated.
             existed_before_poll = existed_now
-        logger.info(
-            "database.contains | path=%s | id=%s | contains=%s | "
-            "row_count=%d | existed_before_current_poll=%s | poll_label=%s",
+        _sqlite_log(
+            "database.contains | path=%s | absolute_path=%s | id=%s | "
+            "contains=%s | row_count=%d | existed_before_current_poll=%s | "
+            "poll_label=%s",
             self._path,
+            self.absolute_path,
             listing_id,
             existed_now,
             row_count,
@@ -333,10 +382,12 @@ class ListingDatabase:
         )
         await db.commit()
         inserted = cursor.rowcount is not None and cursor.rowcount > 0
-        logger.info(
-            "database.INSERT | path=%s | id=%s | timestamp=%s | "
-            "first_seen_unix=%s | notified=%s | inserted=%s | title=%r",
+        _sqlite_log(
+            "database.INSERT | path=%s | absolute_path=%s | id=%s | "
+            "timestamp=%s | first_seen_unix=%s | notified=%s | inserted=%s | "
+            "title=%r",
             self._path,
+            self.absolute_path,
             listing_id,
             timestamp,
             first_seen,
@@ -377,10 +428,11 @@ class ListingDatabase:
         ]
         # Log every INSERT attempt with exact id + timestamp before writing.
         for listing_id, source, title, price, url, notified in materialised:
-            logger.info(
-                "database.INSERT | path=%s | id=%s | timestamp=%s | "
-                "first_seen_unix=%s | notified=%s | title=%r",
+            _sqlite_log(
+                "database.INSERT | path=%s | absolute_path=%s | id=%s | "
+                "timestamp=%s | first_seen_unix=%s | notified=%s | title=%r",
                 self._path,
+                self.absolute_path,
                 listing_id,
                 timestamp,
                 first_seen,
@@ -398,10 +450,11 @@ class ListingDatabase:
             rows,
         )
         await db.commit()
-        logger.info(
-            "database.INSERT_BATCH_COMMIT | path=%s | count=%d | timestamp=%s | "
-            "poll_label=%s",
+        _sqlite_log(
+            "database.INSERT_BATCH_COMMIT | path=%s | absolute_path=%s | "
+            "count=%d | timestamp=%s | poll_label=%s",
             self._path,
+            self.absolute_path,
             len(rows),
             timestamp,
             self._poll_label,
