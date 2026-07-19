@@ -70,26 +70,33 @@ class DiscordNotifier:
         self,
         listing: "Listing",
         *,
-        expected_profit: float,
-        max_buy_price: float,
+        resale_price: float,
+        profit: float,
+        model: str,
+        storage_gb: int,
     ) -> bool:
         """Send a formatted notification for a profitable ``listing``.
 
         :param listing: The listing that matched.
-        :param expected_profit: Estimated profit computed by the monitor.
-        :param max_buy_price: Configured maximum buy price for this target.
+        :param resale_price: Configured expected resale price for the phone.
+        :param profit: ``resale_price - listing_price``.
+        :param model: Detected phone model (e.g. ``"iPhone 13 Pro"``).
+        :param storage_gb: Detected storage capacity in GB.
         :returns: ``True`` if the message was accepted by Discord, else
             ``False``. Dry-run (no webhook configured) counts as success.
         """
-        payload = self._build_payload(listing, expected_profit, max_buy_price)
+        payload = self._build_payload(listing, resale_price, profit, model, storage_gb)
 
         if not self.enabled:
             logger.info(
-                "[dry-run] Would notify: %s | price=%s%s | profit=%.2f | %s",
-                listing.title,
+                "[dry-run] Would notify: %s %dGB | price=%s%s | resale=%.2f | "
+                "profit=%.2f | %s",
+                model,
+                storage_gb,
                 listing.price,
                 listing.currency,
-                expected_profit,
+                resale_price,
+                profit,
                 listing.url,
             )
             return True
@@ -99,8 +106,10 @@ class DiscordNotifier:
     def _build_payload(
         self,
         listing: "Listing",
-        expected_profit: float,
-        max_buy_price: float,
+        resale_price: float,
+        profit: float,
+        model: str,
+        storage_gb: int,
     ) -> dict:
         """Construct the Discord webhook JSON payload with a rich embed."""
         currency = f" {listing.currency}" if listing.currency else ""
@@ -108,15 +117,20 @@ class DiscordNotifier:
             f"{listing.price:.2f}{currency}" if listing.has_price else "n/a"
         )
         fields = [
-            {"name": "Price", "value": price_text, "inline": True},
             {
-                "name": "Max buy",
-                "value": f"{max_buy_price:.2f}{currency}",
+                "name": "Model",
+                "value": f"{model} {storage_gb}GB",
+                "inline": False,
+            },
+            {"name": "Listing price", "value": price_text, "inline": True},
+            {
+                "name": "Resale price",
+                "value": f"{resale_price:.2f}{currency}",
                 "inline": True,
             },
             {
-                "name": "Est. profit",
-                "value": f"{expected_profit:.2f}{currency}",
+                "name": "Profit",
+                "value": f"{profit:.2f}{currency}",
                 "inline": True,
             },
         ]

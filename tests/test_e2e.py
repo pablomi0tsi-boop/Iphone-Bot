@@ -1,20 +1,16 @@
-"""End-to-end test for the OLX phone-deal monitor.
+"""End-to-end test for the OLX iPhone resale-deal monitor.
 
 Spins up a local aiohttp server that impersonates BOTH the OLX offers API and a
 Discord webhook, points the monitor at it, and asserts the full pipeline works:
 
-    fetch -> drop promoted ads -> keyword filter -> profit calc
-          -> SQLite batch de-dup -> queue -> Discord notify
+    fetch -> drop promoted -> blacklist -> parse model/storage -> resale lookup
+          -> profit -> SQLite batch de-dup -> queue -> Discord notify
 
 No network access, secrets or real accounts are required, so this runs anywhere.
 
 Run directly::
 
     python tests/test_e2e.py
-
-or under pytest::
-
-    pytest -q
 """
 
 from __future__ import annotations
@@ -26,16 +22,24 @@ from pathlib import Path
 import aiohttp
 from aiohttp import web
 
-# Make the project root importable when run as a script.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from database import ListingDatabase  # noqa: E402
 from discord import DiscordNotifier  # noqa: E402
-from main import AppConfig, DealMonitor, FeeConfig, Target  # noqa: E402
+from main import AppConfig, DealMonitor  # noqa: E402
 from olx import OlxClient  # noqa: E402
+from pricing import PriceBook  # noqa: E402
 
 
-def _offer(offer_id: int, title: str, price, *, currency: str = "PLN") -> dict:
+def _offer(
+    offer_id: int,
+    title: str,
+    price,
+    *,
+    description: str = "",
+    model_label: str | None = None,
+    storage_label: str | None = None,
+    currency: str = "PLN",
+) -> dict:
     """Build an OLX-API-shaped offer dict for the fake server."""
     params = []
     if price is not None:
@@ -45,35 +49,52 @@ def _offer(offer_id: int, title: str, price, *, currency: str = "PLN") -> dict:
                 "value": {"value": price, "currency": currency, "label": f"{price} zł"},
             }
         )
+    if model_label is not None:
+        params.append(
+            {"key": "phonemodel", "value": {"key": "m", "label": model_label}}
+        )
+    if storage_label is not None:
+        params.append(
+            {
+                "key": "builtinmemory_phones",
+                "value": {"key": "s", "label": storage_label},
+            }
+        )
     return {
         "id": offer_id,
         "title": title,
         "url": f"https://www.olx.pl/oferta/{offer_id}",
         "created_time": "2026-07-19T10:00:00+02:00",
+        "description": description,
         "params": params,
         "location": {"city": {"name": "Warszawa"}, "region": {"name": "Mazowieckie"}},
         "photos": [{"link": "https://example.com/{width}x{height}/pic.jpg"}],
     }
 
 
-# The catalogue the fake OLX returns for the iphone query. Index 4 is flagged as
-# a promoted ad in metadata and must be ignored despite looking like a deal.
+# Index 5 is flagged promoted and must be ignored despite looking like a deal.
 FAKE_OFFERS = [
-    _offer(1001, "iPhone 13 128GB idealny", 1200),      # organic deal -> notify
-    _offer(1002, "iPhone 13 Pro Max", 4500),            # too expensive -> no notify
-    _offer(1003, "Etui iPhone 13 silikon", 30),         # excluded keyword -> no notify
-    _offer(1004, "iPhone 13 zamiana", None),            # no price -> no notify
-    _offer(1005, "iPhone 13 mega okazja", 900),         # PROMOTED -> must be skipped
+    # organic deal via STRUCTURED hints: resale 1900 - 1200 = 700 profit
+    _offer(2001, "iPhone 13 128GB idealny", 1200,
+           model_label="iPhone 13", storage_label="128GB"),
+    # text-parsed, not profitable: resale(13 Pro Max/256)=3050 - 5000 < 0
+    _offer(2002, "iPhone 13 Pro Max 256GB", 5000),
+    # blacklisted (icloud) even though cheap
+    _offer(2003, "iPhone 13 128GB blokada icloud", 500),
+    # storage cannot be determined -> ignore
+    _offer(2004, "iPhone 13 sprzedam", 800),
+    # unknown model (not in price book) -> ignore
+    _offer(2005, "iPhone 99 128GB", 100),
+    # PROMOTED look-alike deal -> must be skipped
+    _offer(2006, "iPhone 13 128GB tanio", 100,
+           model_label="iPhone 13", storage_label="128GB"),
 ]
-PROMOTED_INDICES = [4]
+PROMOTED_INDICES = [5]
 
 
 class FakeServer:
-    """Serves the fake OLX API and captures Discord webhook payloads."""
-
     def __init__(self) -> None:
         self.webhook_payloads: list[dict] = []
-        self.offer_requests = 0
         self._runner: web.AppRunner | None = None
         self.base_url = ""
 
@@ -93,10 +114,8 @@ class FakeServer:
             await self._runner.cleanup()
 
     async def _offers(self, request: web.Request) -> web.Response:
-        self.offer_requests += 1
         query = request.query.get("query", "").lower()
         offset = int(request.query.get("offset", "0"))
-        # Only the first page has data; subsequent offsets are empty.
         if "iphone" not in query or offset > 0:
             return web.json_response({"data": [], "metadata": {"promoted": []}})
         return web.json_response(
@@ -125,37 +144,26 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         request_timeout_seconds=5.0,
         results_per_query=40,
         pages_per_poll=1,
+        search_queries=["iphone 13"],
         database_path=":memory:",
-        default_min_expected_profit=100.0,
-        default_min_listing_price=0.0,
-        fees=FeeConfig(flat=0.0, percentage=10.0),
+        min_profit=1.0,
+        blacklist_keywords=["icloud", "blokada", "uszkodzony", "na części"],
         prime_on_start=prime,
-        targets=[
-            Target(
-                name="iPhone 13",
-                query="iphone 13",
-                max_buy_price=1500.0,
-                market_value=2000.0,
-                keywords_any=["iphone 13"],
-                keywords_exclude=["etui", "case"],
-                min_expected_profit=100.0,
-            )
-        ],
+        price_book=PriceBook(
+            {
+                "iPhone 13": {"128": 1900, "256": 2100},
+                "iPhone 13 Pro Max": {"256": 3050},
+            }
+        ),
     )
 
 
 async def _run_cycles(
     monitor: DealMonitor, cycles: int, *, priming_first_cycle: bool
 ) -> None:
-    """Run ``cycles`` polls against the fake server, draining the notify queue."""
     await monitor._db.connect()
     async with aiohttp.ClientSession() as session:
-        olx = OlxClient(
-            session,
-            base_url=monitor._config.olx_base_url,
-            user_agent=monitor._config.olx_user_agent,
-            request_timeout=monitor._config.request_timeout_seconds,
-        )
+        olx = OlxClient(session, base_url=monitor._config.olx_base_url)
         notifier = DiscordNotifier(
             session,
             webhook_url=monitor._config.webhook_url,
@@ -166,9 +174,9 @@ async def _run_cycles(
         try:
             for cycle in range(cycles):
                 priming = priming_first_cycle and cycle == 0
-                for target in monitor._config.targets:
-                    listings = await olx.search(target.query)
-                    await monitor._process_listings(target, listings, priming=priming)
+                for query in monitor._config.search_queries:
+                    listings = await olx.search(query)
+                    await monitor._process_listings(query, listings, priming=priming)
                 await monitor._queue.join()
         finally:
             worker.cancel()
@@ -176,9 +184,9 @@ async def _run_cycles(
     await monitor._db.close()
 
 
-async def test_notifies_only_good_deals_dedupes_and_skips_promoted() -> None:
-    """Exactly one webhook fires for the single organic good deal; the promoted
-    look-alike (1005) is skipped, and a second identical cycle sends nothing."""
+async def test_full_matching_pipeline() -> None:
+    """Only the single profitable, non-blacklisted, identifiable organic listing
+    notifies; everything else is filtered; a second cycle de-dupes."""
     server = FakeServer()
     await server.start()
     try:
@@ -188,19 +196,39 @@ async def test_notifies_only_good_deals_dedupes_and_skips_promoted() -> None:
         assert len(server.webhook_payloads) == 1, (
             f"expected exactly 1 webhook, got {len(server.webhook_payloads)}"
         )
-        embed = server.webhook_payloads[0]["embeds"][0]
-        assert "iPhone 13 128GB" in embed["title"], embed["title"]
-        assert "okazja" not in embed["title"], "promoted ad must not be notified"
-        # profit = 2000 - 1200 - 0 - (2000 * 10%) = 600
-        profit_field = next(f for f in embed["fields"] if f["name"] == "Est. profit")
-        assert profit_field["value"].startswith("600.00"), profit_field
-        print("PASS: notifies only good organic deals, de-dupes, skips promoted")
+        fields = {f["name"]: f["value"] for f in server.webhook_payloads[0]["embeds"][0]["fields"]}
+        assert fields["Model"] == "iPhone 13 128GB", fields
+        assert fields["Profit"].startswith("700.00"), fields  # 1900 - 1200
+        assert fields["Resale price"].startswith("1900.00"), fields
+        print("PASS: full pipeline notifies only the valid profitable deal, de-dupes")
+    finally:
+        await server.stop()
+
+
+async def test_blacklist_and_unknowns_are_ignored() -> None:
+    """Blacklisted / unknown-storage / unknown-model / promoted / unprofitable
+    listings never notify (verified via evaluate())."""
+    server = FakeServer()
+    await server.start()
+    try:
+        monitor = DealMonitor(_build_config(server, prime=False))
+        async with aiohttp.ClientSession() as session:
+            olx = OlxClient(session, base_url=f"{server.base_url}/api/v1/offers/")
+            listings = await olx.search("iphone 13")
+        by_id = {listing.id: listing for listing in listings}
+        # Promoted 2006 filtered by the client already.
+        assert "2006" not in by_id, "promoted listing should be filtered by client"
+        assert monitor.evaluate(by_id["2001"]) is not None       # good deal
+        assert monitor.evaluate(by_id["2002"]) is None           # not profitable
+        assert monitor.evaluate(by_id["2003"]) is None           # blacklisted
+        assert monitor.evaluate(by_id["2004"]) is None           # no storage
+        assert monitor.evaluate(by_id["2005"]) is None           # unknown model
+        print("PASS: blacklist / unknown storage / unknown model / unprofitable ignored")
     finally:
         await server.stop()
 
 
 async def test_priming_suppresses_first_cycle() -> None:
-    """With priming on, the first cycle records but never notifies."""
     server = FakeServer()
     await server.start()
     try:
@@ -212,45 +240,9 @@ async def test_priming_suppresses_first_cycle() -> None:
         await server.stop()
 
 
-async def test_olx_client_filters_promoted_and_dedupes() -> None:
-    """The OLX client drops promoted indices and de-dupes ids across pages."""
-    server = FakeServer()
-    await server.start()
-    try:
-        async with aiohttp.ClientSession() as session:
-            olx = OlxClient(session, base_url=f"{server.base_url}/api/v1/offers/")
-            listings = await olx.search("iphone 13", pages=2)
-        ids = {listing.id for listing in listings}
-        assert "1005" not in ids, "promoted offer 1005 should be filtered out"
-        assert {"1001", "1002", "1003", "1004"} <= ids
-        assert len(listings) == 4, listings
-        print("PASS: OLX client filters promoted ads and de-dupes")
-    finally:
-        await server.stop()
-
-
-async def test_profit_and_deal_logic_units() -> None:
-    """Unit-level checks of the profit and deal-threshold helpers."""
-    server = FakeServer()  # only needed to build a config object
-    monitor = DealMonitor(_build_config(server, prime=False))
-    target = monitor._config.targets[0]
-
-    from olx import Listing
-
-    cheap = Listing(id="1", title="iPhone 13", price=1200, currency="PLN", url="")
-    pricey = Listing(id="2", title="iPhone 13", price=1900, currency="PLN", url="")
-
-    assert monitor.expected_profit(cheap, target) == 600.0
-    assert monitor.is_good_deal(cheap, target, 600.0) is True
-    # 1900 > max_buy_price(1500) -> not a deal even if profit were positive
-    assert monitor.is_good_deal(pricey, target, monitor.expected_profit(pricey, target)) is False
-    print("PASS: profit calculation and deal thresholds")
-
-
 async def _main() -> None:
-    await test_profit_and_deal_logic_units()
-    await test_olx_client_filters_promoted_and_dedupes()
-    await test_notifies_only_good_deals_dedupes_and_skips_promoted()
+    await test_blacklist_and_unknowns_are_ignored()
+    await test_full_matching_pipeline()
     await test_priming_suppresses_first_cycle()
     print("\nALL TESTS PASSED")
 

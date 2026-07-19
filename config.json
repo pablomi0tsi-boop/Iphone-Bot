@@ -1,7 +1,7 @@
 {
   "discord": {
     "webhook_url": "",
-    "username": "Phone Deal Bot",
+    "username": "iPhone Deal Bot",
     "rate_limit_seconds": 0.5
   },
   "olx": {
@@ -16,42 +16,55 @@
     "max_backoff_seconds": 300,
     "request_timeout_seconds": 15,
     "results_per_query": 40,
-    "pages_per_poll": 1
+    "pages_per_poll": 1,
+    "search_queries": [
+      "iphone 11",
+      "iphone 12",
+      "iphone 13",
+      "iphone 14",
+      "iphone 15",
+      "iphone 16"
+    ]
   },
   "database": {
     "path": "listings.db"
   },
-  "fees": {
-    "flat": 0,
-    "percentage": 10
-  },
-  "min_expected_profit": 100,
-  "min_listing_price": 300,
+  "min_profit": 1,
   "prime_on_start": true,
-  "targets": [
-    {
-      "name": "iPhone 13",
-      "query": "iphone 13",
-      "keywords_any": ["iphone 13"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
-      "max_buy_price": 1500,
-      "market_value": 2000
-    },
-    {
-      "name": "Samsung Galaxy S23",
-      "query": "samsung galaxy s23",
-      "keywords_any": ["s23"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
-      "max_buy_price": 1600,
-      "market_value": 2200
-    },
-    {
-      "name": "Google Pixel 7",
-      "query": "google pixel 7",
-      "keywords_any": ["pixel 7"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
-      "max_buy_price": 1200,
-      "market_value": 1700
-    }
-  ]
+  "blacklist_keywords": [
+    "icloud",
+    "blokada",
+    "mdm",
+    "na części",
+    "uszkodzony",
+    "zbity",
+    "czytaj opis",
+    "locked",
+    "for parts"
+  ],
+  "resale_prices": {
+    "iPhone 11": { "64GB": 350, "128GB": 400, "256GB": 450 },
+    "iPhone 11 Pro": { "64GB": 450, "128GB": 500, "256GB": 550 },
+    "iPhone 11 Pro Max": { "64GB": 500, "256GB": 600, "512GB": 650 },
+    "iPhone 12 Mini": { "64GB": 400, "128GB": 450, "256GB": 550 },
+    "iPhone 12": { "64GB": 450, "128GB": 500, "256GB": 600 },
+    "iPhone 12 Pro": { "128GB": 700, "256GB": 750, "512GB": 850 },
+    "iPhone 12 Pro Max": { "128GB": 850, "256GB": 900, "512GB": 1000 },
+    "iPhone 13 Mini": { "128GB": 700, "256GB": 800 },
+    "iPhone 13": { "128GB": 800, "256GB": 900, "512GB": 1000 },
+    "iPhone 13 Pro": { "128GB": 1100, "256GB": 1200, "512GB": 1300 },
+    "iPhone 13 Pro Max": { "128GB": 1250, "256GB": 1300, "512GB": 1400 },
+    "iPhone 14": { "128GB": 950, "256GB": 1050, "512GB": 1200 },
+    "iPhone 14 Plus": { "128GB": 1050, "256GB": 1100, "512GB": 1150 },
+    "iPhone 14 Pro": { "128GB": 1450, "256GB": 1550, "512GB": 1650 },
+    "iPhone 14 Pro Max": { "128GB": 1700, "256GB": 1800, "512GB": 1900 },
+    "iPhone 15": { "128GB": 1500, "256GB": 1650, "512GB": 1750 },
+    "iPhone 15 Plus": { "128GB": 1600, "256GB": 1750, "512GB": 1850 },
+    "iPhone 15 Pro": { "128GB": 2050, "256GB": 2200, "512GB": 2400 },
+    "iPhone 15 Pro Max": { "256GB": 2300, "512GB": 2500 },
+    "iPhone 16": { "128GB": 2050, "256GB": 2250, "512GB": 2400 },
+    "iPhone 16 Plus": { "128GB": 2300, "256GB": 2400, "512GB": 2500 },
+    "iPhone 16 Pro": { "128GB": 3000, "256GB": 3050, "512GB": 3150 },
+    "iPhone 16 Pro Max": { "128GB": 3250, "256GB": 3300, "512GB": 3400 }
+  }
 }

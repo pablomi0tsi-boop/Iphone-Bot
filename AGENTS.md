@@ -2,7 +2,10 @@
 
 ## Cursor Cloud specific instructions
 
-Python `asyncio` OLX phone-deal monitor. Single service, CLI/headless (no GUI).
+Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
+(no GUI). Flow: poll OLX per `search_queries` → drop promoted → blacklist filter
+→ detect model+storage (`pricing.py`) → look up `resale_prices` → notify when
+`profit = resale − listing_price > min_profit` (default 1).
 
 ### Environment
 - Python 3.12. Dependencies live in `requirements.txt` (`aiohttp`, `aiosqlite`).
@@ -20,11 +23,12 @@ Python `asyncio` OLX phone-deal monitor. Single service, CLI/headless (no GUI).
 - Stop with Ctrl-C — shutdown is graceful and finishes the current cycle.
 
 ### Test / verify
+- Units: `python tests/test_pricing.py` (model/storage parser + `PriceBook`).
 - End-to-end: `python tests/test_e2e.py`. It starts a local aiohttp server that
   fakes BOTH the OLX API and the Discord webhook, so it needs no network or
   secrets and is the fastest way to validate the full pipeline.
-- There is no separate lint config; `python -m py_compile main.py olx.py
-  database.py discord.py` is a quick syntax check.
+- There is no separate lint config; `python -m py_compile *.py` is a quick
+  syntax check.
 
 ### Gotchas
 - `discord.py` here is a **local module** (webhook sender), not the third-party
@@ -45,8 +49,15 @@ Python `asyncio` OLX phone-deal monitor. Single service, CLI/headless (no GUI).
   reintroduce a `created_at` sort assumption.
 - Each page injects paid **promoted ads**; their indices are in
   `metadata.promoted`. `olx.py` drops them by default (`include_promoted:false`).
-- Many listings are priced `0` (swap/"zamiana"); `min_listing_price` in config
-  filters these out so they don't show as huge fake profits.
+- OLX phone listings expose structured attributes `phonemodel` and
+  `builtinmemory_phones` (storage) in `params`, plus a full HTML `description`.
+  `pricing.py` prefers these structured hints, then parses title/description.
+- Storage/model detection is deliberately conservative: text capacities need an
+  explicit GB/TB unit and must be unambiguous, else the listing is ignored.
+- `resale_prices` in `config.json` are **EXAMPLE values** — the real list must be
+  provided by the user. Prices drive buy decisions, so never invent them.
+- Swap/"Zamienię" listings report `price = 0`, so `profit = resale` and they DO
+  notify (spec: any `profit > 1`). There is intentionally no min-price floor.
 - Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
   index lag (server-side, uncontrollable). "Within seconds" is best-effort, not
   guaranteed.

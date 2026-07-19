@@ -30,10 +30,15 @@ back-off; only per-offer parsing errors are swallowed.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
+
+# Matches any HTML tag so OLX descriptions (which contain ``<br />`` etc.) can be
+# flattened to plain text before keyword/model parsing.
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 logger = logging.getLogger(__name__)
 
@@ -56,12 +61,22 @@ class Listing:
     created_at: Optional[str] = None
     location: Optional[str] = None
     image_url: Optional[str] = None
+    description: str = ""
+    # High-confidence structured attributes provided by OLX's phone category
+    # (may be absent on many listings, in which case they are ``None``).
+    model_hint: Optional[str] = None
+    storage_hint: Optional[str] = None
     source: str = "olx"
 
     @property
     def has_price(self) -> bool:
         """Return ``True`` when a numeric price is available."""
         return self.price is not None
+
+    @property
+    def search_text(self) -> str:
+        """Title + description, lower-cased, for keyword/model/storage parsing."""
+        return f"{self.title}\n{self.description}".lower()
 
 
 class OlxClient:
@@ -193,7 +208,8 @@ class OlxClient:
         if offer_id is None:
             return None
 
-        price, currency = self._extract_price(offer.get("params", []))
+        params = offer.get("params", [])
+        price, currency = self._extract_price(params)
         return Listing(
             id=str(offer_id),
             title=(offer.get("title") or "").strip(),
@@ -203,6 +219,9 @@ class OlxClient:
             created_at=offer.get("created_time") or offer.get("last_refresh_time"),
             location=self._extract_location(offer.get("location")),
             image_url=self._extract_image(offer.get("photos")),
+            description=self._clean_description(offer.get("description")),
+            model_hint=self._extract_param_label(params, "phonemodel"),
+            storage_hint=self._extract_param_label(params, "builtinmemory_phones"),
         )
 
     @staticmethod
@@ -231,6 +250,35 @@ class OlxClient:
             except (TypeError, ValueError):
                 return None, currency
         return None, ""
+
+    @staticmethod
+    def _clean_description(description: Any) -> str:
+        """Flatten an OLX HTML description to plain, single-spaced text."""
+        if not isinstance(description, str):
+            return ""
+        text = _HTML_TAG_RE.sub(" ", description)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @staticmethod
+    def _extract_param_label(params: Any, key: str) -> Optional[str]:
+        """Return the human label of a structured OLX ``select`` param.
+
+        OLX phone listings expose attributes such as ``phonemodel`` and
+        ``builtinmemory_phones`` shaped like
+        ``{"key": "...", "value": {"key": "128gb", "label": "128GB"}}``.
+        These are far more reliable than free-text parsing when present.
+        """
+        if not isinstance(params, list):
+            return None
+        for param in params:
+            if not isinstance(param, dict) or param.get("key") != key:
+                continue
+            value = param.get("value")
+            if isinstance(value, dict):
+                label = value.get("label")
+                return str(label) if label else None
+            return None
+        return None
 
     @staticmethod
     def _extract_location(location: Any) -> Optional[str]:
