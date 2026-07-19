@@ -1,20 +1,37 @@
 """OLX marketplace client.
 
-OLX exposes a JSON API used by its own web front-end, for example::
+OLX exposes the JSON API that powers its own web front-end, for example::
 
-    https://www.olx.pl/api/v1/offers/?query=iphone&limit=40&sort_by=created_at%3Adesc
+    https://www.olx.pl/api/v1/offers/?query=iphone&limit=40&offset=0
 
 This module wraps that endpoint with a small, typed, asynchronous client that
 returns normalised :class:`Listing` objects. The base URL is configurable so the
 same code works across OLX country domains (``olx.pl``, ``olx.ro``,
 ``olx.bg`` ...), all of which share the same API shape.
+
+Important real-world behaviours this client accounts for (verified empirically
+against the live API):
+
+* **Promoted ads are injected.** Every page mixes paid "promoted"/``top_ad``
+  listings into the results at fixed positions. The API reports their indices in
+  ``metadata.promoted``; this client drops them by default so the monitor only
+  reacts to genuine organic listings and does not waste its page budget on the
+  same recycled shop ads.
+* **``sort_by=created_at`` is NOT honoured.** The endpoint accepts
+  ``sort_by=filter_float_price:asc|desc`` (verified working) but silently ignores
+  ``created_at`` ordering and can even surface very old listings first. Because
+  there is no reliable "newest first" ordering, detection relies on de-duplicating
+  every organic result against the local database rather than trusting order.
+
+This client therefore raises on transport/HTTP errors so the caller can apply
+back-off; only per-offer parsing errors are swallowed.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
 
@@ -56,8 +73,10 @@ class OlxClient:
         *,
         base_url: str = "https://www.olx.pl/api/v1/offers/",
         user_agent: str = "Mozilla/5.0 (compatible; PhoneDealBot/1.0)",
-        request_timeout: float = 20.0,
+        request_timeout: float = 15.0,
         region_id: Optional[int] = None,
+        sort_by: Optional[str] = None,
+        include_promoted: bool = False,
         extra_params: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Create the client.
@@ -68,63 +87,101 @@ class OlxClient:
             rejects requests without a browser-like UA.
         :param request_timeout: Per-request timeout in seconds.
         :param region_id: Optional OLX region id to narrow the search.
+        :param sort_by: Optional OLX sort key. Only price sorting is honoured by
+            the API (``filter_float_price:asc`` / ``filter_float_price:desc``);
+            ``created_at`` ordering is ignored server-side. Leave ``None`` to use
+            OLX's default ordering, which surfaces fresh listings best.
+        :param include_promoted: When ``False`` (default) paid/promoted ads
+            reported in ``metadata.promoted`` are filtered out.
         :param extra_params: Optional extra query parameters merged into every
-            request (e.g. category id or a custom sort).
+            request (e.g. a category id).
         """
         self._session = session
         self._base_url = base_url
         self._request_timeout = request_timeout
         self._region_id = region_id
+        self._sort_by = sort_by or None
+        self._include_promoted = include_promoted
         self._extra_params = dict(extra_params or {})
         self._headers = {
             "User-Agent": user_agent,
             "Accept": "application/json",
         }
 
-    async def search(self, query: str, *, limit: int = 40) -> List[Listing]:
-        """Search OLX for ``query`` and return the newest listings first.
+    async def search(
+        self, query: str, *, limit: int = 40, pages: int = 1
+    ) -> List[Listing]:
+        """Search OLX for ``query`` and return de-duplicated organic listings.
 
-        Network and decoding errors are logged and swallowed (an empty list is
-        returned) so a transient failure never crashes the polling loop.
+        Fetches ``pages`` sequential pages of ``limit`` organic results each,
+        dropping promoted ads. Because the API provides no reliable chronological
+        order, the caller is expected to de-duplicate returned ids against
+        persistent storage to discover which listings are new.
+
+        Raises on transport/HTTP errors (so the caller can back off); individual
+        malformed offers are skipped.
 
         :param query: Free-text search term, e.g. ``"iphone 13"``.
-        :param limit: Maximum number of offers to request (OLX caps at 40).
+        :param limit: Organic results per page (OLX caps at 40).
+        :param pages: How many pages to fetch. More pages widen coverage of new
+            listings at the cost of extra requests.
         """
-        params: Dict[str, Any] = {
-            "query": query,
-            "limit": max(1, min(limit, 40)),
-            "offset": 0,
-            "sort_by": "created_at:desc",
-        }
+        per_page = max(1, min(limit, 40))
+        collected: List[Listing] = []
+        seen_ids: Set[str] = set()
+
+        for page in range(max(1, pages)):
+            offers, promoted = await self._fetch_page(query, per_page, page * per_page)
+            for index, offer in enumerate(offers):
+                if not self._include_promoted and index in promoted:
+                    continue
+                try:
+                    listing = self._parse_offer(offer)
+                except Exception as exc:  # noqa: BLE001 - skip one bad offer only
+                    logger.debug("Skipping malformed OLX offer: %s", exc)
+                    continue
+                if listing is None or listing.id in seen_ids:
+                    continue
+                seen_ids.add(listing.id)
+                collected.append(listing)
+            # Last page reached (fewer results than requested).
+            if len(offers) < per_page:
+                break
+
+        logger.debug("OLX query %r returned %d organic listing(s)", query, len(collected))
+        return collected
+
+    async def _fetch_page(
+        self, query: str, limit: int, offset: int
+    ) -> Tuple[List[Dict[str, Any]], Set[int]]:
+        """Fetch one raw page, returning ``(offers, promoted_indices)``.
+
+        :raises aiohttp.ClientError: on any transport/HTTP failure.
+        """
+        params: Dict[str, Any] = {"query": query, "limit": limit, "offset": offset}
+        if self._sort_by is not None:
+            params["sort_by"] = self._sort_by
         if self._region_id is not None:
             params["region_id"] = self._region_id
         params.update(self._extra_params)
 
         timeout = aiohttp.ClientTimeout(total=self._request_timeout)
-        try:
-            async with self._session.get(
-                self._base_url,
-                params=params,
-                headers=self._headers,
-                timeout=timeout,
-            ) as response:
-                response.raise_for_status()
-                payload = await response.json(content_type=None)
-        except aiohttp.ClientError as exc:
-            logger.warning("OLX request failed for query %r: %s", query, exc)
-            return []
-        except Exception as exc:  # noqa: BLE001 - defensive: never crash the loop
-            logger.warning("Unexpected error parsing OLX response for %r: %s", query, exc)
-            return []
+        async with self._session.get(
+            self._base_url,
+            params=params,
+            headers=self._headers,
+            timeout=timeout,
+        ) as response:
+            response.raise_for_status()
+            payload = await response.json(content_type=None)
 
-        offers = payload.get("data", []) if isinstance(payload, dict) else []
-        listings: List[Listing] = []
-        for offer in offers:
-            listing = self._parse_offer(offer)
-            if listing is not None:
-                listings.append(listing)
-        logger.debug("OLX query %r returned %d listings", query, len(listings))
-        return listings
+        if not isinstance(payload, dict):
+            return [], set()
+        offers = payload.get("data", []) or []
+        metadata = payload.get("metadata") or {}
+        promoted_raw = metadata.get("promoted") or []
+        promoted = {int(i) for i in promoted_raw if isinstance(i, (int, float))}
+        return offers, promoted
 
     def _parse_offer(self, offer: Dict[str, Any]) -> Optional[Listing]:
         """Convert a raw OLX offer dict into a :class:`Listing`.
@@ -149,7 +206,7 @@ class OlxClient:
         )
 
     @staticmethod
-    def _extract_price(params: Any) -> tuple[Optional[float], str]:
+    def _extract_price(params: Any) -> Tuple[Optional[float], str]:
         """Pull the numeric price and currency out of the OLX ``params`` list.
 
         OLX represents price as one entry in ``params`` shaped like::

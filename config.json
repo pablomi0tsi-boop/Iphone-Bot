@@ -1,16 +1,22 @@
 {
   "discord": {
     "webhook_url": "",
-    "username": "Phone Deal Bot"
+    "username": "Phone Deal Bot",
+    "rate_limit_seconds": 0.5
   },
   "olx": {
     "base_url": "https://www.olx.pl/api/v1/offers/",
     "user_agent": "Mozilla/5.0 (compatible; PhoneDealBot/1.0)",
     "region_id": null,
+    "sort_by": null,
+    "include_promoted": false,
     "extra_params": {},
-    "poll_interval_seconds": 60,
-    "request_timeout_seconds": 20,
-    "results_per_query": 40
+    "poll_interval_seconds": 10,
+    "jitter_seconds": 2,
+    "max_backoff_seconds": 300,
+    "request_timeout_seconds": 15,
+    "results_per_query": 40,
+    "pages_per_poll": 1
   },
   "database": {
     "path": "listings.db"
@@ -20,13 +26,14 @@
     "percentage": 10
   },
   "min_expected_profit": 100,
+  "min_listing_price": 300,
   "prime_on_start": true,
   "targets": [
     {
       "name": "iPhone 13",
       "query": "iphone 13",
       "keywords_any": ["iphone 13"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "uszkodzony", "części"],
+      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
       "max_buy_price": 1500,
       "market_value": 2000
     },
@@ -34,7 +41,7 @@
       "name": "Samsung Galaxy S23",
       "query": "samsung galaxy s23",
       "keywords_any": ["s23"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "uszkodzony", "części"],
+      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
       "max_buy_price": 1600,
       "market_value": 2200
     },
@@ -42,7 +49,7 @@
       "name": "Google Pixel 7",
       "query": "google pixel 7",
       "keywords_any": ["pixel 7"],
-      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "uszkodzony", "części"],
+      "keywords_exclude": ["etui", "case", "cover", "szkło", "obudowa", "ładowarka", "kabel", "uszkodzony", "części"],
       "max_buy_price": 1200,
       "market_value": 1700
     }

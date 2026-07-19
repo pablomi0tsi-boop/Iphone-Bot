@@ -31,7 +31,22 @@ Python `asyncio` OLX phone-deal monitor. Single service, CLI/headless (no GUI).
   `discord.py` package. Do not `pip install discord.py`; it would shadow this
   module. Notifications use plain `aiohttp` POSTs.
 - SQLite (`listings.db` by default) is the de-dup store. Deleting it makes every
-  current listing look "new" again; combined with `prime_on_start: false` that
-  causes a burst of notifications on the next run. Keep `prime_on_start: true`
-  in production so the back-catalogue is recorded silently on first cycle.
+  current listing look "new" again. Priming now only runs on a **fresh/empty**
+  DB, so with an existing DB a restart notifies for listings new since last run.
 - `*.db` files and `.venv/` are git-ignored; don't commit them.
+
+### OLX API behaviour (verified, non-obvious — don't "fix" as bugs)
+- The OLX `/api/v1/offers/` endpoint is **unofficial** (no official/public or
+  push API exists) and needs a browser-like `User-Agent`.
+- **`sort_by=created_at:*` is silently ignored** by the API (asc and desc return
+  identical, non-chronological results, sometimes oldest-first). Only
+  `filter_float_price:asc|desc` actually sorts. So there is NO reliable
+  newest-first order — detection MUST rely on DB de-dup, not ordering. Do not
+  reintroduce a `created_at` sort assumption.
+- Each page injects paid **promoted ads**; their indices are in
+  `metadata.promoted`. `olx.py` drops them by default (`include_promoted:false`).
+- Many listings are priced `0` (swap/"zamiana"); `min_listing_price` in config
+  filters these out so they don't show as huge fake profits.
+- Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
+  index lag (server-side, uncontrollable). "Within seconds" is best-effort, not
+  guaranteed.

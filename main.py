@@ -11,8 +11,16 @@ Run it with::
     python main.py            # uses ./config.json
     python main.py my.json    # custom config path
 
-Everything is asyncio-based: all configured search targets are polled
-concurrently every ``poll_interval_seconds``.
+Architecture (tuned for low detection latency + stability):
+
+* Each search target runs its **own** independent polling loop, so a slow or
+  failing target never delays the others.
+* Each loop polls on a short base interval plus a small random **jitter**, and
+  applies **exponential back-off** on errors to stay stable if OLX throttles.
+* Detected deals are pushed onto an :class:`asyncio.Queue` and sent by a
+  dedicated notifier worker, so Discord latency/rate-limits never slow down
+  OLX polling (i.e. detection latency is decoupled from delivery latency).
+* De-duplication is batched (one query + one commit per poll).
 """
 
 from __future__ import annotations
@@ -20,11 +28,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import signal
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import aiohttp
 
@@ -33,6 +42,9 @@ from discord import DiscordNotifier
 from olx import Listing, OlxClient
 
 logger = logging.getLogger("phonedealbot")
+
+# Item pushed onto the notification queue.
+DealItem = Tuple[Listing, float, float, str]  # (listing, profit, max_buy, target_name)
 
 
 # --------------------------------------------------------------------------- #
@@ -61,6 +73,7 @@ class Target:
     keywords_any: List[str] = field(default_factory=list)
     keywords_exclude: List[str] = field(default_factory=list)
     min_expected_profit: Optional[float] = None
+    min_price: Optional[float] = None
 
     def matches_title(self, title: str) -> bool:
         """Return ``True`` if ``title`` passes the include/exclude keyword rules.
@@ -83,17 +96,24 @@ class AppConfig:
 
     webhook_url: str
     discord_username: str
+    discord_rate_limit_seconds: float
     olx_base_url: str
     olx_user_agent: str
     olx_region_id: Optional[int]
+    olx_sort_by: Optional[str]
+    olx_include_promoted: bool
     olx_extra_params: Dict[str, Any]
     poll_interval_seconds: float
+    jitter_seconds: float
+    max_backoff_seconds: float
     request_timeout_seconds: float
+    results_per_query: int
+    pages_per_poll: int
     database_path: str
     default_min_expected_profit: float
+    default_min_listing_price: float
     fees: FeeConfig
     prime_on_start: bool
-    results_per_query: int
     targets: List[Target]
 
 
@@ -135,6 +155,9 @@ def load_config(path: str | Path) -> AppConfig:
                         if "min_expected_profit" in entry
                         else None
                     ),
+                    min_price=(
+                        float(entry["min_price"]) if "min_price" in entry else None
+                    ),
                 )
             )
         except (KeyError, TypeError, ValueError) as exc:
@@ -143,22 +166,29 @@ def load_config(path: str | Path) -> AppConfig:
     return AppConfig(
         webhook_url=discord_cfg.get("webhook_url", ""),
         discord_username=discord_cfg.get("username", "Phone Deal Bot"),
+        discord_rate_limit_seconds=float(discord_cfg.get("rate_limit_seconds", 0.5)),
         olx_base_url=olx.get("base_url", "https://www.olx.pl/api/v1/offers/"),
         olx_user_agent=olx.get(
             "user_agent", "Mozilla/5.0 (compatible; PhoneDealBot/1.0)"
         ),
         olx_region_id=olx.get("region_id"),
+        olx_sort_by=(olx.get("sort_by") or None),
+        olx_include_promoted=bool(olx.get("include_promoted", False)),
         olx_extra_params=dict(olx.get("extra_params", {})),
-        poll_interval_seconds=float(olx.get("poll_interval_seconds", 60)),
-        request_timeout_seconds=float(olx.get("request_timeout_seconds", 20)),
+        poll_interval_seconds=float(olx.get("poll_interval_seconds", 10)),
+        jitter_seconds=float(olx.get("jitter_seconds", 2)),
+        max_backoff_seconds=float(olx.get("max_backoff_seconds", 300)),
+        request_timeout_seconds=float(olx.get("request_timeout_seconds", 15)),
+        results_per_query=int(olx.get("results_per_query", 40)),
+        pages_per_poll=max(1, int(olx.get("pages_per_poll", 1))),
         database_path=db_cfg.get("path", "listings.db"),
         default_min_expected_profit=float(raw.get("min_expected_profit", 0)),
+        default_min_listing_price=float(raw.get("min_listing_price", 0)),
         fees=FeeConfig(
             flat=float(fees_cfg.get("flat", 0)),
             percentage=float(fees_cfg.get("percentage", 0)),
         ),
         prime_on_start=bool(raw.get("prime_on_start", True)),
-        results_per_query=int(olx.get("results_per_query", 40)),
         targets=targets,
     )
 
@@ -173,13 +203,14 @@ class DealMonitor:
         self._config = config
         self._db = ListingDatabase(config.database_path)
         self._stop_event = asyncio.Event()
-        self._primed = False
+        self._queue: asyncio.Queue[DealItem] = asyncio.Queue()
 
     def request_stop(self) -> None:
-        """Signal the polling loop to finish the current cycle and exit."""
-        logger.info("Shutdown requested; stopping after current cycle...")
+        """Signal every polling loop to finish promptly and exit."""
+        logger.info("Shutdown requested; stopping...")
         self._stop_event.set()
 
+    # -- economics ---------------------------------------------------------- #
     def expected_profit(self, listing: Listing, target: Target) -> Optional[float]:
         """Estimate resale profit for ``listing`` under ``target``'s economics.
 
@@ -199,6 +230,15 @@ class DealMonitor:
         """Return ``True`` when a listing meets the buy/profit thresholds."""
         if listing.price is None or profit is None:
             return False
+        # Guard against "swap"/parts listings priced at 0 (or suspiciously low),
+        # which would otherwise look like enormous fake profits.
+        min_price = (
+            target.min_price
+            if target.min_price is not None
+            else self._config.default_min_listing_price
+        )
+        if listing.price < min_price:
+            return False
         if listing.price > target.max_buy_price:
             return False
         threshold = (
@@ -208,10 +248,26 @@ class DealMonitor:
         )
         return profit >= threshold
 
+    # -- lifecycle ---------------------------------------------------------- #
     async def run(self) -> None:
-        """Run the monitor until stop is requested."""
+        """Run the monitor until a stop is requested."""
         await self._db.connect()
-        connector = aiohttp.TCPConnector(limit=10)
+
+        # Only prime (silently record the back-catalogue) on a genuinely fresh
+        # database. On restart the DB already has history, so newly-appeared
+        # listings should notify immediately rather than being suppressed.
+        existing = await self._db.count()
+        start_primed = existing > 0 or not self._config.prime_on_start
+
+        # Connection tuning: reuse sockets and cache DNS to shave per-request
+        # latency across the many polls this app makes.
+        connector = aiohttp.TCPConnector(
+            limit=20,
+            limit_per_host=10,
+            ttl_dns_cache=300,
+            keepalive_timeout=30,
+            enable_cleanup_closed=True,
+        )
         async with aiohttp.ClientSession(connector=connector) as session:
             olx_client = OlxClient(
                 session,
@@ -219,12 +275,15 @@ class DealMonitor:
                 user_agent=self._config.olx_user_agent,
                 request_timeout=self._config.request_timeout_seconds,
                 region_id=self._config.olx_region_id,
+                sort_by=self._config.olx_sort_by,
+                include_promoted=self._config.olx_include_promoted,
                 extra_params=self._config.olx_extra_params,
             )
             notifier = DiscordNotifier(
                 session,
                 webhook_url=self._config.webhook_url,
                 username=self._config.discord_username,
+                rate_limit_seconds=self._config.discord_rate_limit_seconds,
             )
             if not notifier.enabled:
                 logger.warning(
@@ -233,107 +292,156 @@ class DealMonitor:
                 )
 
             logger.info(
-                "Monitoring %d target(s) on %s every %.0fs",
+                "Monitoring %d target(s) on %s | base interval %.0fs (+<=%.0fs jitter)"
+                "%s",
                 len(self._config.targets),
                 self._config.olx_base_url,
                 self._config.poll_interval_seconds,
+                self._config.jitter_seconds,
+                "" if start_primed else " | priming first cycle",
             )
+
+            worker = asyncio.create_task(self._notifier_worker(notifier))
+            loops = [
+                asyncio.create_task(
+                    self._run_target_loop(target, olx_client, primed=start_primed)
+                )
+                for target in self._config.targets
+            ]
             try:
-                await self._poll_forever(olx_client, notifier)
+                await self._stop_event.wait()
             finally:
+                for task in loops:
+                    task.cancel()
+                await asyncio.gather(*loops, return_exceptions=True)
+                # Let any queued notifications drain before shutting the worker.
+                await self._queue.join()
+                worker.cancel()
+                await asyncio.gather(worker, return_exceptions=True)
                 await self._db.close()
 
-    async def _poll_forever(
-        self, olx_client: OlxClient, notifier: DiscordNotifier
+    async def _run_target_loop(
+        self, target: Target, olx_client: OlxClient, *, primed: bool
     ) -> None:
-        """Poll every target concurrently on a fixed interval until stopped."""
+        """Independently poll a single target forever with jitter + back-off."""
+        base = self._config.poll_interval_seconds
+        backoff = 0.0
+        local_primed = primed
+
         while not self._stop_event.is_set():
-            results = await asyncio.gather(
-                *(
-                    self._poll_target(target, olx_client, notifier)
-                    for target in self._config.targets
-                ),
-                return_exceptions=True,
-            )
-            for target, result in zip(self._config.targets, results):
-                if isinstance(result, Exception):
-                    logger.error("Target %r failed: %s", target.name, result)
-
-            # First cycle only records existing listings so we don't spam
-            # notifications for the entire back-catalogue on start-up.
-            if not self._primed and self._config.prime_on_start:
-                self._primed = True
-                logger.info("Priming complete; future new listings will notify.")
-
-            await self._sleep_or_stop(self._config.poll_interval_seconds)
-
-    async def _poll_target(
-        self, target: Target, olx_client: OlxClient, notifier: DiscordNotifier
-    ) -> None:
-        """Fetch, filter and act on new listings for a single target."""
-        listings = await olx_client.search(
-            target.query, limit=self._config.results_per_query
-        )
-        priming = self._config.prime_on_start and not self._primed
-        new_count = 0
-        deal_count = 0
-
-        for listing in listings:
-            if await self._db.is_seen(listing.id):
-                continue
-            new_count += 1
-
-            if not target.matches_title(listing.title):
-                # Record so we don't re-evaluate it every cycle.
-                await self._db.mark_seen(
-                    listing.id,
-                    source=listing.source,
-                    title=listing.title,
-                    price=listing.price,
-                    url=listing.url,
-                    notified=False,
+            try:
+                listings = await olx_client.search(
+                    target.query,
+                    limit=self._config.results_per_query,
+                    pages=self._config.pages_per_poll,
                 )
-                continue
+                await self._process_listings(
+                    target, listings, priming=not local_primed
+                )
+                if not local_primed:
+                    local_primed = True
+                    logger.info(
+                        "[%s] priming complete; new listings will now notify",
+                        target.name,
+                    )
+                backoff = 0.0
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                backoff = min(
+                    base if backoff == 0 else backoff * 2,
+                    self._config.max_backoff_seconds,
+                )
+                logger.warning(
+                    "[%s] poll failed: %s (backing off %.0fs)",
+                    target.name,
+                    exc,
+                    backoff,
+                )
 
-            profit = self.expected_profit(listing, target)
-            good = self.is_good_deal(listing, target, profit)
-            should_notify = good and not priming
+            delay = (backoff if backoff else base) + random.uniform(
+                0, self._config.jitter_seconds
+            )
+            await self._sleep_or_stop(delay)
 
-            if should_notify:
-                assert profit is not None
+    async def _process_listings(
+        self, target: Target, listings: List[Listing], *, priming: bool
+    ) -> None:
+        """Filter, cost and enqueue new listings for a single poll result.
+
+        De-duplication is done in one batch query; all newly seen listings are
+        persisted in one commit; qualifying deals are queued (best profit first)
+        for the notifier worker to deliver.
+        """
+        if not listings:
+            return
+
+        ids = [listing.id for listing in listings]
+        already_seen = await self._db.seen_subset(ids)
+        new_listings = [listing for listing in listings if listing.id not in already_seen]
+        if not new_listings:
+            return
+
+        records = []
+        deals: List[Tuple[Listing, float]] = []
+        for listing in new_listings:
+            notified = False
+            if target.matches_title(listing.title):
+                profit = self.expected_profit(listing, target)
+                if not priming and self.is_good_deal(listing, target, profit):
+                    assert profit is not None
+                    deals.append((listing, profit))
+                    notified = True
+            records.append(
+                (
+                    listing.id,
+                    listing.source,
+                    listing.title,
+                    listing.price,
+                    listing.url,
+                    notified,
+                )
+            )
+
+        # Persist first so a crash can't cause the same deal to be re-notified.
+        await self._db.mark_seen_many(records)
+
+        # Deliver the most profitable deals first for lowest time-to-alert.
+        deals.sort(key=lambda item: item[1], reverse=True)
+        for listing, profit in deals:
+            await self._queue.put((listing, profit, target.max_buy_price, target.name))
+
+        logger.info(
+            "[%s] %d new listing(s), %d deal(s)%s",
+            target.name,
+            len(new_listings),
+            len(deals),
+            " (priming - not notified)" if priming else "",
+        )
+
+    async def _notifier_worker(self, notifier: DiscordNotifier) -> None:
+        """Drain the deal queue and deliver notifications, one at a time."""
+        while True:
+            listing, profit, max_buy, target_name = await self._queue.get()
+            try:
                 sent = await notifier.send_deal(
-                    listing,
-                    expected_profit=profit,
-                    max_buy_price=target.max_buy_price,
+                    listing, expected_profit=profit, max_buy_price=max_buy
                 )
                 if sent:
-                    deal_count += 1
                     logger.info(
                         "DEAL [%s] %s | price=%s | profit=%.2f | %s",
-                        target.name,
+                        target_name,
                         listing.title,
                         listing.price,
                         profit,
                         listing.url,
                     )
-
-            await self._db.mark_seen(
-                listing.id,
-                source=listing.source,
-                title=listing.title,
-                price=listing.price,
-                url=listing.url,
-                notified=should_notify,
-            )
-
-        if new_count:
-            logger.info(
-                "[%s] %d new listing(s), %d deal(s)%s",
-                target.name,
-                new_count,
-                deal_count,
-                " (priming - not notified)" if priming else "",
-            )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - never let one send kill worker
+                logger.warning("Notification delivery failed: %s", exc)
+            finally:
+                self._queue.task_done()
 
     async def _sleep_or_stop(self, seconds: float) -> None:
         """Sleep for ``seconds`` unless a stop is requested first."""

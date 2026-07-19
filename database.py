@@ -11,9 +11,13 @@ with the asyncio event loop that drives the rest of the application.
 from __future__ import annotations
 
 import time
-from typing import Optional
+from typing import Iterable, Optional, Sequence, Set, Tuple
 
 import aiosqlite
+
+# A row queued for bulk insertion:
+#   (listing_id, source, title, price, url, notified)
+SeenRecord = Tuple[str, str, Optional[str], Optional[float], Optional[str], bool]
 
 __all__ = ["ListingDatabase"]
 
@@ -86,6 +90,32 @@ class ListingDatabase:
         ) as cursor:
             return await cursor.fetchone() is not None
 
+    async def seen_subset(self, listing_ids: Sequence[str]) -> Set[str]:
+        """Return the subset of ``listing_ids`` already present in the database.
+
+        This is the batch counterpart to :meth:`is_seen`: it lets the caller
+        discover every new id in a page with a single query instead of one query
+        per listing, which materially reduces per-poll latency.
+        """
+        if not listing_ids:
+            return set()
+        db = self._require_db()
+        # SQLite limits the number of bound variables (default 999); pages are
+        # small (<= 40) but chunk defensively just in case.
+        found: Set[str] = set()
+        chunk = 500
+        for start in range(0, len(listing_ids), chunk):
+            batch = listing_ids[start : start + chunk]
+            placeholders = ",".join("?" * len(batch))
+            query = (
+                f"SELECT listing_id FROM seen_listings "
+                f"WHERE listing_id IN ({placeholders})"
+            )
+            async with db.execute(query, tuple(batch)) as cursor:
+                rows = await cursor.fetchall()
+            found.update(row[0] for row in rows)
+        return found
+
     async def count(self) -> int:
         """Return the number of listings currently stored (useful for tests)."""
         db = self._require_db()
@@ -131,5 +161,40 @@ class ListingDatabase:
                 1 if notified else 0,
                 time.time(),
             ),
+        )
+        await db.commit()
+
+    async def mark_seen_many(self, records: Iterable[SeenRecord]) -> None:
+        """Record many listings in a single transaction/commit.
+
+        Committing once per poll (instead of once per listing) avoids repeated
+        fsyncs and keeps the polling loop responsive under bursts of new
+        listings.
+
+        :param records: Iterable of
+            ``(listing_id, source, title, price, url, notified)`` tuples.
+        """
+        rows = [
+            (
+                listing_id,
+                source,
+                title,
+                price,
+                url,
+                1 if notified else 0,
+                time.time(),
+            )
+            for (listing_id, source, title, price, url, notified) in records
+        ]
+        if not rows:
+            return
+        db = self._require_db()
+        await db.executemany(
+            """
+            INSERT OR IGNORE INTO seen_listings
+                (listing_id, source, title, price, url, notified, first_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
         )
         await db.commit()
