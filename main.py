@@ -211,16 +211,43 @@ class DealMonitor:
         self._stop_event.set()
 
     # -- matching ----------------------------------------------------------- #
+    def matching_filter_reason(self, listing: Listing) -> Optional[str]:
+        """Return the exact blacklist/accessory rejection reason, if any."""
+        text = listing.search_text
+        for keyword in self._config.blacklist_keywords:
+            if keyword in text:
+                return f"blacklist keyword: {keyword!r}"
+        for keyword in self._config.accessory_keywords:
+            if keyword in text:
+                return f"accessory keyword: {keyword!r}"
+        return None
+
     def has_filtered_keyword(self, listing: Listing) -> bool:
         """Return ``True`` if the listing text contains a blacklisted or
         accessory keyword (checked against both title and description)."""
-        text = listing.search_text
-        return any(
-            keyword in text
-            for keyword in self._config.blacklist_keywords
-        ) or any(
-            keyword in text
-            for keyword in self._config.accessory_keywords
+        return self.matching_filter_reason(listing) is not None
+
+    def _log_rejection(
+        self,
+        listing: Listing,
+        *,
+        reason: str,
+        model: Optional[str],
+        storage_gb: Optional[int],
+        resale: Optional[float],
+        profit: Optional[float],
+    ) -> None:
+        """Emit a debug line for a filtered-out listing with full context."""
+        logger.debug(
+            "Rejected listing | title=%r | price=%s | model=%s | storage=%s | "
+            "resale=%s | profit=%s | reason=%s",
+            listing.title,
+            listing.price,
+            model,
+            storage_gb,
+            resale,
+            profit,
+            reason,
         )
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
@@ -238,35 +265,67 @@ class DealMonitor:
         * has no configured resale price, or
         * profit is below ``minimum_profit``.
 
+        Every rejection is logged at DEBUG with title, price, detected
+        model/storage, calculated resale/profit, and the exact reason.
+
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
-        if self.has_filtered_keyword(listing):
-            return None
-        if listing.price is None or listing.price <= 0:
-            return None
-        if listing.photo_count <= 0:
-            return None
-        if listing.is_business is True:
-            return None
-
+        # Detect early so rejection logs can include model/storage/resale/profit
+        # even when an earlier filter (blacklist, photos, ...) rejects the ad.
         spec = detect_phone(
             listing.title,
             listing.description,
             model_hint=listing.model_hint,
             storage_hint=listing.storage_hint,
         )
-        if not spec.is_confident:
-            return None
-        assert spec.model is not None and spec.storage_gb is not None
+        model = spec.model
+        storage_gb = spec.storage_gb
+        resale = self._config.price_book.lookup(model, storage_gb)
+        price = listing.price
+        profit: Optional[float] = (
+            resale - price if resale is not None and price is not None else None
+        )
 
-        resale = self._config.price_book.lookup(spec.model, spec.storage_gb)
+        def reject(reason: str) -> None:
+            self._log_rejection(
+                listing,
+                reason=reason,
+                model=model,
+                storage_gb=storage_gb,
+                resale=resale,
+                profit=profit,
+            )
+
+        filter_reason = self.matching_filter_reason(listing)
+        if filter_reason is not None:
+            reject(filter_reason)
+            return None
+        if price is None or price <= 0:
+            reject("no price" if price is None else "price <= 0")
+            return None
+        if listing.photo_count <= 0:
+            reject("no photos")
+            return None
+        if listing.is_business is True:
+            reject("business seller")
+            return None
+        if model is None:
+            reject("unknown model")
+            return None
+        if storage_gb is None:
+            reject("unsupported storage")
+            return None
         if resale is None:
+            reject("no configured resale price")
             return None
-
-        profit = resale - listing.price
+        assert profit is not None
         if profit < self._config.minimum_profit:
+            reject(
+                "profit below threshold "
+                f"({profit:.2f} < {self._config.minimum_profit:.2f})"
+            )
             return None
-        return (listing, spec.model, spec.storage_gb, resale, profit, "")
+        return (listing, model, storage_gb, resale, profit, "")
 
     # -- lifecycle ---------------------------------------------------------- #
     async def run(self) -> None:

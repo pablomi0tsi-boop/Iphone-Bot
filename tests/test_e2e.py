@@ -16,6 +16,7 @@ Run directly::
 from __future__ import annotations
 
 import asyncio
+import logging
 import sys
 from pathlib import Path
 
@@ -28,6 +29,17 @@ from discord import DiscordNotifier  # noqa: E402
 from main import AppConfig, DealMonitor  # noqa: E402
 from olx import OlxClient  # noqa: E402
 from pricing import PriceBook  # noqa: E402
+
+
+class _DebugLogCapture(logging.Handler):
+    """Collect formatted DEBUG log records for assertion."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.messages: list[str] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.messages.append(record.getMessage())
 
 
 def _offer(
@@ -258,20 +270,62 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         by_id = {listing.id: listing for listing in listings}
         # Promoted 2006 filtered by the client already.
         assert "2006" not in by_id, "promoted listing should be filtered by client"
-        assert monitor.evaluate(by_id["2001"]) is not None       # good deal
-        assert monitor.evaluate(by_id["2002"]) is None           # not profitable
-        assert monitor.evaluate(by_id["2003"]) is None           # blacklisted
-        assert monitor.evaluate(by_id["2004"]) is None           # no storage
-        assert monitor.evaluate(by_id["2005"]) is None           # unknown model
-        assert monitor.evaluate(by_id["2007"]) is None           # swap keyword
-        assert monitor.evaluate(by_id["2008"]) is None           # price == 0
-        assert monitor.evaluate(by_id["2009"]) is None           # no photos
-        assert monitor.evaluate(by_id["2010"]) is None           # business account
-        assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
-        assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
+
+        log_capture = _DebugLogCapture()
+        main_logger = logging.getLogger("phonedealbot")
+        main_logger.addHandler(log_capture)
+        previous_level = main_logger.level
+        main_logger.setLevel(logging.DEBUG)
+        try:
+            assert monitor.evaluate(by_id["2001"]) is not None       # good deal
+            assert monitor.evaluate(by_id["2002"]) is None           # not profitable
+            assert monitor.evaluate(by_id["2003"]) is None           # blacklisted
+            assert monitor.evaluate(by_id["2004"]) is None           # no storage
+            assert monitor.evaluate(by_id["2005"]) is None           # unknown model
+            assert monitor.evaluate(by_id["2007"]) is None           # swap keyword
+            assert monitor.evaluate(by_id["2008"]) is None           # price == 0
+            assert monitor.evaluate(by_id["2009"]) is None           # no photos
+            assert monitor.evaluate(by_id["2010"]) is None           # business account
+            assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
+            assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
+        finally:
+            main_logger.removeHandler(log_capture)
+            main_logger.setLevel(previous_level)
+
+        expected_reasons = {
+            "2002": "profit below threshold",
+            "2003": "blacklist keyword: 'icloud'",
+            "2004": "unsupported storage",
+            "2005": "unknown model",
+            "2007": "blacklist keyword: 'zamiana'",
+            "2008": "price <= 0",
+            "2009": "no photos",
+            "2010": "business seller",
+            "2011": "accessory keyword: 'bateria'",
+            "2012": "profit below threshold",
+        }
+        for listing_id, reason_fragment in expected_reasons.items():
+            listing = by_id[listing_id]
+            match = next(
+                (
+                    msg
+                    for msg in log_capture.messages
+                    if f"title={listing.title!r}" in msg and "Rejected listing" in msg
+                ),
+                None,
+            )
+            assert match is not None, (
+                f"missing rejection log for {listing_id}: {log_capture.messages}"
+            )
+            assert f"reason={reason_fragment}" in match or reason_fragment in match, match
+            assert f"price={listing.price}" in match
+            assert "model=" in match and "storage=" in match
+            assert "resale=" in match and "profit=" in match
+
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
-            "no-photos / business / accessory / below-min-profit ignored"
+            "no-photos / business / accessory / below-min-profit ignored "
+            "(with debug rejection logs)"
         )
     finally:
         await server.stop()
