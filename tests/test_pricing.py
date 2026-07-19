@@ -33,14 +33,22 @@ def test_parse_models_specificity() -> None:
 
 
 def test_parse_storages() -> None:
+    # Unit-qualified variants.
     assert parse_storages("iPhone 13 128GB") == {128}
+    assert parse_storages("256 gb") == {256}
+    assert parse_storages("128g") == {128}
     assert parse_storages("pojemność 1 TB") == {1024}
     assert parse_storages("1tb wersja") == {1024}
+    assert parse_storages("1024gb") == {1024}
     assert parse_storages("128gb lub 256gb") == {128, 256}
+    # Bare capacities 128/256/512/1024 ARE recognised now.
+    assert parse_storages("iPhone 13 128") == {128}
+    assert parse_storages("wersja 512") == {512}
+    # Bare 16/32/64 are NOT matched (avoid model-number clashes like iPhone 16).
+    assert parse_storages("iPhone 16") == set()
+    assert parse_storages("iPhone 11") == set()
     assert parse_storages("bez pojemnosci") == set()
-    # Bare number without a unit is NOT treated as storage.
-    assert parse_storages("iPhone 13") == set()
-    print("PASS: parse_storages requires explicit units")
+    print("PASS: parse_storages recognises units + bare 128/256/512/1024")
 
 
 def test_storage_label_to_gb() -> None:

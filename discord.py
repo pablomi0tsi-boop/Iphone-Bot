@@ -103,6 +103,13 @@ class DiscordNotifier:
 
         return await self._post(payload)
 
+    @staticmethod
+    def _format_storage(storage_gb: int) -> str:
+        """Human-friendly storage label, e.g. ``256GB`` or ``1TB``."""
+        if storage_gb % 1024 == 0:
+            return f"{storage_gb // 1024}TB"
+        return f"{storage_gb}GB"
+
     def _build_payload(
         self,
         listing: "Listing",
@@ -117,30 +124,52 @@ class DiscordNotifier:
             f"{listing.price:.2f}{currency}" if listing.has_price else "n/a"
         )
         fields = [
+            {"name": "📱 Model", "value": model, "inline": True},
             {
-                "name": "Model",
-                "value": f"{model} {storage_gb}GB",
-                "inline": False,
+                "name": "💾 Storage",
+                "value": self._format_storage(storage_gb),
+                "inline": True,
             },
-            {"name": "Listing price", "value": price_text, "inline": True},
             {
-                "name": "Resale price",
+                "name": "💰 Listing price",
+                "value": price_text,
+                "inline": True,
+            },
+            {
+                "name": "🏷️ My resale price",
                 "value": f"{resale_price:.2f}{currency}",
                 "inline": True,
             },
             {
-                "name": "Profit",
+                "name": "📈 Expected profit",
                 "value": f"{profit:.2f}{currency}",
                 "inline": True,
             },
+            {
+                "name": "📍 Location",
+                "value": listing.location or "—",
+                "inline": True,
+            },
+            {
+                "name": "👤 Seller name",
+                "value": listing.seller_name or "—",
+                "inline": True,
+            },
+            {
+                "name": "🕒 Listing date",
+                "value": listing.created_at or "—",
+                "inline": True,
+            },
+            {
+                "name": "🔗 Link",
+                "value": f"[Open on OLX]({listing.url})" if listing.url else "—",
+                "inline": False,
+            },
         ]
-        if listing.location:
-            fields.append(
-                {"name": "Location", "value": listing.location, "inline": False}
-            )
 
         embed: dict = {
-            "title": listing.title or "New listing",
+            "title": "🔥 DEAL FOUND",
+            "description": listing.title or None,
             "url": listing.url or None,
             "color": _EMBED_COLOR,
             "fields": fields,

@@ -29,7 +29,8 @@
   "database": {
     "path": "listings.db"
   },
-  "min_profit": 1,
+  "minimum_profit": 300,
+  "stats_interval_seconds": 600,
   "prime_on_start": true,
   "blacklist_keywords": [
     "icloud",
@@ -46,6 +47,27 @@
     "swap",
     "wymiana",
     "trade"
+  ],
+  "accessory_keywords": [
+    "etui",
+    "case",
+    "pokrowiec",
+    "szkło",
+    "szybka",
+    "wyświetlacz",
+    "ekran",
+    "lcd",
+    "oled",
+    "bateria",
+    "taśma",
+    "płyta",
+    "części",
+    "housing",
+    "obudowa",
+    "ładowarka",
+    "kabel",
+    "airpods",
+    "apple watch"
   ],
   "resale_prices": {
     "iPhone 11": { "64GB": 350, "128GB": 400, "256GB": 450 },

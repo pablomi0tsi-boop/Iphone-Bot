@@ -40,6 +40,7 @@ def _offer(
     storage_label: str | None = None,
     photos: int = 1,
     business: bool = False,
+    seller: str | None = None,
     currency: str = "PLN",
 ) -> dict:
     """Build an OLX-API-shaped offer dict for the fake server."""
@@ -70,6 +71,7 @@ def _offer(
         "description": description,
         "params": params,
         "business": business,
+        "user": {"name": seller} if seller else None,
         "location": {"city": {"name": "Warszawa"}, "region": {"name": "Mazowieckie"}},
         "photos": [
             {"link": "https://example.com/{width}x{height}/pic.jpg"}
@@ -82,7 +84,7 @@ def _offer(
 FAKE_OFFERS = [
     # organic deal via STRUCTURED hints: resale 1900 - 1200 = 700 profit
     _offer(2001, "iPhone 13 128GB idealny", 1200,
-           model_label="iPhone 13", storage_label="128GB", photos=3),
+           model_label="iPhone 13", storage_label="128GB", photos=3, seller="Jan K"),
     # text-parsed, not profitable: resale(13 Pro Max/256)=3050 - 5000 < 0
     _offer(2002, "iPhone 13 Pro Max 256GB", 5000),
     # blacklisted (icloud) even though cheap
@@ -106,6 +108,12 @@ FAKE_OFFERS = [
     # business/shop account -> ignore
     _offer(2010, "iPhone 13 128GB", 400,
            model_label="iPhone 13", storage_label="128GB", photos=3, business=True),
+    # accessory keyword ("bateria") -> ignore even though it parses as a phone
+    _offer(2011, "iPhone 13 128GB bateria do wymiany", 400,
+           model_label="iPhone 13", storage_label="128GB", photos=3),
+    # below minimum_profit (resale 1900 - 1750 = 150 < 300) -> ignore
+    _offer(2012, "iPhone 13 128GB", 1750,
+           model_label="iPhone 13", storage_label="128GB", photos=3),
 ]
 PROMOTED_INDICES = [5]
 
@@ -164,11 +172,13 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         pages_per_poll=1,
         search_queries=["iphone 13"],
         database_path=":memory:",
-        min_profit=1.0,
+        minimum_profit=300.0,
+        stats_interval_seconds=0.0,
         blacklist_keywords=[
             "icloud", "blokada", "uszkodzony", "na części",
             "zamienię", "zamiana", "swap", "wymiana", "trade",
         ],
+        accessory_keywords=["etui", "case", "bateria", "szkło", "ładowarka"],
         prime_on_start=prime,
         price_book=PriceBook(
             {
@@ -217,10 +227,19 @@ async def test_full_matching_pipeline() -> None:
         assert len(server.webhook_payloads) == 1, (
             f"expected exactly 1 webhook, got {len(server.webhook_payloads)}"
         )
-        fields = {f["name"]: f["value"] for f in server.webhook_payloads[0]["embeds"][0]["fields"]}
-        assert fields["Model"] == "iPhone 13 128GB", fields
-        assert fields["Profit"].startswith("700.00"), fields  # 1900 - 1200
-        assert fields["Resale price"].startswith("1900.00"), fields
+        embed = server.webhook_payloads[0]["embeds"][0]
+        assert embed["title"] == "🔥 DEAL FOUND", embed["title"]
+        fields = {f["name"]: f["value"] for f in embed["fields"]}
+        assert fields["📱 Model"] == "iPhone 13", fields
+        assert fields["💾 Storage"] == "128GB", fields
+        assert fields["📈 Expected profit"].startswith("700.00"), fields  # 1900 - 1200
+        assert fields["🏷️ My resale price"].startswith("1900.00"), fields
+        assert fields["👤 Seller name"] == "Jan K", fields
+        assert "Open on OLX" in fields["🔗 Link"], fields
+        # Stats counters updated.
+        assert monitor._stats.deals_found == 1, monitor._stats
+        assert monitor._stats.notifications_sent == 1, monitor._stats
+        assert monitor._stats.average_profit == 700.0, monitor._stats
         print("PASS: full pipeline notifies only the valid profitable deal, de-dupes")
     finally:
         await server.stop()
@@ -248,9 +267,11 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         assert monitor.evaluate(by_id["2008"]) is None           # price == 0
         assert monitor.evaluate(by_id["2009"]) is None           # no photos
         assert monitor.evaluate(by_id["2010"]) is None           # business account
+        assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
+        assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
         print(
-            "PASS: blacklist / no-storage / unknown-model / unprofitable / swap / "
-            "zero-price / no-photos / business ignored"
+            "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
+            "no-photos / business / accessory / below-min-profit ignored"
         )
     finally:
         await server.stop()

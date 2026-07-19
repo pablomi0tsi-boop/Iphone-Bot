@@ -74,8 +74,15 @@ _MODEL_PATTERNS = [
 # Order patterns so the longest phrase is tried first regardless of list order.
 _MODEL_PATTERNS.sort(key=lambda item: len(item[0]), reverse=True)
 
-# "128 gb", "256gb", "1 tb", "1tb"
-_STORAGE_RE = re.compile(r"(\d{1,4})\s*(gb|tb)\b", re.IGNORECASE)
+# Capacities that may appear as a *bare* number (no unit), e.g. "iPhone 13 128".
+# Deliberately excludes 16/32/64 so model numbers like "iPhone 16" are never
+# misread as a 16 GB capacity.
+_BARE_STORAGE_GB = {128, 256, 512, 1024}
+
+# Unit-qualified capacities: "128 gb", "256gb", "128g", "1 tb", "1tb", "1024gb".
+_STORAGE_UNIT_RE = re.compile(r"(\d{1,4})\s*(tb|gb|g)\b", re.IGNORECASE)
+# Bare capacities (standalone token), e.g. "128", "256", "512", "1024".
+_STORAGE_BARE_RE = re.compile(r"\b(128|256|512|1024)\b")
 
 
 @dataclass(slots=True)
@@ -130,13 +137,23 @@ def parse_models(text: str) -> Set[str]:
 
 
 def parse_storages(text: str) -> Set[int]:
-    """Return the set of distinct valid storage capacities (GB) in ``text``."""
+    """Return the set of distinct valid storage capacities (GB) in ``text``.
+
+    Recognises unit-qualified capacities (``128gb``, ``128 gb``, ``128g``,
+    ``1tb``, ``1 tb``, ``1024gb``) and bare capacities (``128``, ``256``,
+    ``512``, ``1024``). Bare ``16``/``32``/``64`` are intentionally NOT matched
+    so a model number such as "iPhone 16" is never read as 16 GB.
+    """
     found: Set[int] = set()
-    for match in _STORAGE_RE.finditer(text):
+    for match in _STORAGE_UNIT_RE.finditer(text):
         value = int(match.group(1))
         if match.group(2).lower() == "tb":
             value *= 1024
         if value in VALID_STORAGE_GB:
+            found.add(value)
+    for match in _STORAGE_BARE_RE.finditer(text):
+        value = int(match.group(1))
+        if value in _BARE_STORAGE_GB:
             found.add(value)
     return found
 
