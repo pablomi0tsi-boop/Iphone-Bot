@@ -153,6 +153,10 @@ class ListingDatabase:
         ) as cursor:
             return await cursor.fetchone() is not None
 
+    async def contains(self, listing_id: str) -> bool:
+        """Alias for :meth:`is_seen` — ``True`` when SQLite already has ``id``."""
+        return await self.is_seen(listing_id)
+
     async def seen_subset(self, listing_ids: Sequence[str]) -> Set[str]:
         """Return the subset of ``listing_ids`` already present in the database.
 

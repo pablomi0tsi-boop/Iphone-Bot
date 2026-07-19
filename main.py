@@ -664,24 +664,74 @@ class DealMonitor:
         priming every new id is recorded with ``notified=False`` and no Discord
         message is sent.
 
-        After priming, every unseen listing is logged **before** deal filters
-        run (id, title, created_at, price), then again with ``inserted=`` after
-        the SQLite write — so empty polls surface as ``0 unseen listings``.
+        The unseen set is always computed **before** any SQLite insert. After
+        priming, every poll logs ``database.contains(id)`` for each first-10 id
+        and either per-unseen details or ``0 unseen listings`` with the decision
+        site — so a rotating ``first10_ids`` that are all already primed is
+        distinguishable from a parser that finds nothing new.
         """
+        # --- Empty fetch --------------------------------------------------- #
         if not listings:
             if not priming:
-                logger.info("[%s] 0 unseen listings", query)
+                logger.info(
+                    "[%s] 0 unseen listings | "
+                    "decided_at=_process_listings:empty_fetch | "
+                    "fetched=0 | unseen=0 | "
+                    "unseen_computed_before_insert=True",
+                    query,
+                )
             return
 
+        # --- Unseen computation MUST happen before any insert -------------- #
         ids = [listing.id for listing in listings]
         already_seen = await self._db.seen_subset(ids)
-        new_listings = [listing for listing in listings if listing.id not in already_seen]
+        new_listings = [
+            listing for listing in listings if listing.id not in already_seen
+        ]
+        unseen_count = len(new_listings)  # frozen before any mark_seen_* call
 
-        # Post-prime visibility: did the website parser find anything new?
+        # Correlate with the poll's first10_ids: contains? before insert.
+        first10 = listings[:10]
+        for listing in first10:
+            contains = await self._db.contains(listing.id)
+            in_subset = listing.id in already_seen
+            logger.info(
+                "first10_id DB check (pre-insert) | query=%s | id=%s | "
+                "database.contains=%s | in_seen_subset=%s | agree=%s",
+                query,
+                listing.id,
+                contains,
+                in_subset,
+                contains == in_subset,
+            )
+
+        logger.info(
+            "Unseen count (pre-insert) | query=%s | fetched=%d | "
+            "already_in_db=%d | unseen=%d | priming=%s | "
+            "unseen_computed_before_insert=True",
+            query,
+            len(listings),
+            len(already_seen),
+            unseen_count,
+            priming,
+        )
+
+        # Post-prime: explain 0-unseen vs rotating first10_ids.
+        if not priming and unseen_count == 0:
+            logger.info(
+                "[%s] 0 unseen listings | "
+                "decided_at=_process_listings:all_ids_already_in_sqlite | "
+                "fetched=%d | already_in_db=%d | unseen=0 | "
+                "unseen_computed_before_insert=True | "
+                "note=first10_ids may still change when OLX reorders "
+                "already-seen ads by last_refresh",
+                query,
+                len(listings),
+                len(already_seen),
+            )
+            return
+
         if not priming:
-            if not new_listings:
-                logger.info("[%s] 0 unseen listings", query)
-                return
             for listing in new_listings:
                 logger.info(
                     "Unseen listing (pre-filter) | id=%s | title=%r | "
@@ -693,11 +743,13 @@ class DealMonitor:
                 )
 
         if not new_listings:
+            # Priming path with nothing new (already covered for post-prime).
             return
 
         self._stats.listings_checked += len(new_listings)
 
         # Startup / configured priming: record the live catalogue, never notify.
+        # Inserts happen ONLY after unseen_count was computed above.
         if priming:
             records = [
                 (
@@ -713,7 +765,7 @@ class DealMonitor:
             await self._db.mark_seen_many(records)
             logger.info(
                 "[%s] primed %d listing(s) into DB (%d already known) — "
-                "no notifications",
+                "no notifications | inserts_after_unseen_count=True",
                 query,
                 len(new_listings),
                 len(already_seen),
@@ -743,6 +795,7 @@ class DealMonitor:
                 )
             )
 
+        # Inserts happen ONLY after unseen_count / pre-filter logs above.
         await self._db.mark_seen_many(records)
         confirmed = await self._db.seen_subset([listing.id for listing in new_listings])
         for listing in new_listings:

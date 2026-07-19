@@ -466,6 +466,16 @@ async def test_priming_suppresses_first_cycle() -> None:
         assert any("0 unseen listings" in msg for msg in log_capture.messages), (
             log_capture.messages
         )
+        assert any(
+            "decided_at=_process_listings:all_ids_already_in_sqlite" in msg
+            for msg in log_capture.messages
+        ), log_capture.messages
+        assert any(
+            "first10_id DB check (pre-insert)" in msg for msg in log_capture.messages
+        ), log_capture.messages
+        assert any(
+            "unseen_computed_before_insert=True" in msg for msg in log_capture.messages
+        ), log_capture.messages
         print("PASS: priming suppresses notifications on first + later cycles")
     finally:
         await server.stop()
