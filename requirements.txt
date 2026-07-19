@@ -1,0 +1,5 @@
+# Runtime dependencies for the OLX phone-deal monitor.
+# Async HTTP client used for both the OLX API and Discord webhooks.
+aiohttp>=3.9,<4.0
+# Async SQLite driver used for listing de-duplication.
+aiosqlite>=0.20,<0.21
