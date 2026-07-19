@@ -119,6 +119,7 @@ class AppConfig:
     olx_sort_by: Optional[str]
     olx_include_promoted: bool
     olx_extra_params: Dict[str, Any]
+    olx_search_path_prefix: str
     poll_interval_seconds: float
     jitter_seconds: float
     max_backoff_seconds: float
@@ -212,15 +213,21 @@ def load_config(path: str | Path) -> AppConfig:
         discord_rate_limit_seconds=_number(
             discord_cfg, "rate_limit_seconds", 0.5, minimum=0
         ),
-        olx_base_url=olx.get("base_url", "https://www.olx.pl/api/v1/offers/"),
+        olx_base_url=olx.get("base_url", "https://www.olx.pl/"),
         olx_user_agent=olx.get(
-            "user_agent", "Mozilla/5.0 (compatible; PhoneDealBot/1.0)"
+            "user_agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36",
         ),
         olx_region_id=olx.get("region_id"),
-        # Request newest-first; OLX may ignore this (see OlxClient sort check).
+        # Requested order on the website search URL (search[order]=...).
         olx_sort_by=(olx.get("sort_by") or "created_at:desc"),
         olx_include_promoted=bool(olx.get("include_promoted", False)),
         olx_extra_params=dict(olx.get("extra_params", {})),
+        olx_search_path_prefix=str(
+            olx.get("search_path_prefix", "elektronika/telefony")
+        ),
         poll_interval_seconds=_number(olx, "poll_interval_seconds", 10, minimum=1),
         jitter_seconds=_number(olx, "jitter_seconds", 2, minimum=0),
         max_backoff_seconds=_number(olx, "max_backoff_seconds", 300, minimum=1),
@@ -529,6 +536,7 @@ class DealMonitor:
                 sort_by=self._config.olx_sort_by,
                 include_promoted=self._config.olx_include_promoted,
                 extra_params=self._config.olx_extra_params,
+                search_path_prefix=self._config.olx_search_path_prefix,
             )
             notifier = DiscordNotifier(
                 session,

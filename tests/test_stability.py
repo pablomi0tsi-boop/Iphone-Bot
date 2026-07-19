@@ -91,6 +91,7 @@ def test_config_defaults_and_minimum_profit() -> None:
         assert cfg.debug_notify_all is False  # normal filtering by default
         assert cfg.max_listing_age_seconds == 120.0  # 2-minute freshness window
         assert cfg.olx_sort_by == "created_at:desc"  # request newest-first
+        assert cfg.olx_search_path_prefix == "elektronika/telefony"
         assert cfg.prime_pages_per_query >= 1
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
     print("PASS: config defaults + minimum_profit default (300)")

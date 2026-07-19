@@ -1,10 +1,11 @@
 """End-to-end test for the OLX iPhone resale-deal monitor.
 
-Spins up a local aiohttp server that impersonates BOTH the OLX offers API and a
-Discord webhook, points the monitor at it, and asserts the full pipeline works:
+Spins up a local aiohttp server that impersonates BOTH the OLX website search
+page (``__PRERENDERED_STATE__``) and a Discord webhook, points the monitor at
+it, and asserts the full pipeline works:
 
-    fetch -> drop promoted -> blacklist -> parse model/storage -> resale lookup
-          -> profit -> SQLite batch de-dup -> queue -> Discord notify
+    fetch website SSR -> drop promoted -> blacklist -> parse model/storage
+          -> resale lookup -> profit -> SQLite batch de-dup -> Discord notify
 
 No network access, secrets or real accounts are required, so this runs anywhere.
 
@@ -16,6 +17,7 @@ Run directly::
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import sys
 from datetime import datetime, timedelta, timezone
@@ -66,45 +68,82 @@ def _offer(
     seller: str | None = None,
     currency: str = "PLN",
     created_time: str | None = None,
+    promoted: bool = False,
 ) -> dict:
-    """Build an OLX-API-shaped offer dict for the fake server."""
+    """Build a website-SSR-shaped ad dict for the fake server."""
     params = []
-    if price is not None:
-        params.append(
-            {
-                "key": "price",
-                "value": {"value": price, "currency": currency, "label": f"{price} zł"},
-            }
-        )
     if model_label is not None:
         params.append(
-            {"key": "phonemodel", "value": {"key": "m", "label": model_label}}
+            {
+                "key": "phonemodel",
+                "name": "Model telefonu",
+                "type": "select",
+                "value": model_label,
+                "normalizedValue": model_label.lower().replace(" ", "-"),
+            }
         )
     if storage_label is not None:
         params.append(
             {
                 "key": "builtinmemory_phones",
-                "value": {"key": "s", "label": storage_label},
+                "name": "Pamięć wbudowana",
+                "type": "select",
+                "value": storage_label,
+                "normalizedValue": storage_label.lower(),
             }
         )
+    created = created_time or _fresh_created_time()
+    price_obj = None
+    if price is not None:
+        price_obj = {
+            "budget": False,
+            "free": False,
+            "exchange": False,
+            "displayValue": f"{price} zł",
+            "regularPrice": {
+                "value": price,
+                "currencyCode": currency,
+                "currencySymbol": "zł",
+                "negotiable": False,
+            },
+        }
     return {
         "id": offer_id,
         "title": title,
-        "url": f"https://www.olx.pl/oferta/{offer_id}",
-        "created_time": created_time or _fresh_created_time(),
         "description": description,
+        "url": f"https://www.olx.pl/d/oferta/test-CID99-ID{offer_id}.html",
+        "createdTime": created,
+        "lastRefreshTime": created,
         "params": params,
-        "business": business,
+        "isBusiness": business,
+        "isPromoted": promoted,
+        "searchReason": "promoted" if promoted else "organic",
         "user": {"name": seller} if seller else None,
-        "location": {"city": {"name": "Warszawa"}, "region": {"name": "Mazowieckie"}},
+        "location": {
+            "cityName": "Warszawa",
+            "regionName": "Mazowieckie",
+            "pathName": "Mazowieckie, Warszawa",
+        },
+        "price": price_obj,
         "photos": [
-            {"link": "https://example.com/{width}x{height}/pic.jpg"}
-            for _ in range(photos)
+            f"https://example.com/pic-{offer_id}-{i}.jpg"
+            for i in range(photos)
         ],
     }
 
 
-# Index 5 is flagged promoted and must be ignored despite looking like a deal.
+def _render_search_html(ads: list[dict]) -> str:
+    """Embed ``ads`` in a minimal ``__PRERENDERED_STATE__`` HTML page."""
+    state = {"listing": {"listing": {"ads": ads, "pageNumber": 0}}}
+    encoded = json.dumps(json.dumps(state, ensure_ascii=False))
+    return (
+        "<!doctype html><html><head><title>OLX</title></head><body>"
+        f"<script>window.__PRERENDERED_STATE__ = {encoded};</script>"
+        "</body></html>"
+    )
+
+
+# Promoted look-alike deal must be ignored despite looking like a deal.
 FAKE_OFFERS = [
     # organic deal via STRUCTURED hints: resale 1900 - 1200 = 700 profit
     _offer(2001, "iPhone 13 128GB idealny", 1200,
@@ -119,7 +158,7 @@ FAKE_OFFERS = [
     _offer(2005, "iPhone 99 128GB", 100),
     # PROMOTED look-alike deal -> must be skipped
     _offer(2006, "iPhone 13 128GB tanio", 100,
-           model_label="iPhone 13", storage_label="128GB"),
+           model_label="iPhone 13", storage_label="128GB", promoted=True),
     # swap keyword ("zamiana") -> ignore even though otherwise a deal
     _offer(2007, "iPhone 13 128GB zamiana", 500,
            model_label="iPhone 13", storage_label="128GB", photos=3),
@@ -143,7 +182,6 @@ FAKE_OFFERS = [
            model_label="iPhone 13", storage_label="128GB", photos=3,
            created_time=_stale_created_time()),
 ]
-PROMOTED_INDICES = [5]
 
 
 class FakeServer:
@@ -151,12 +189,14 @@ class FakeServer:
         self.webhook_payloads: list[dict] = []
         self.offers: list[dict] = list(FAKE_OFFERS)
         self.last_offer_params: dict | None = None
+        self.last_request_path: str = ""
         self._runner: web.AppRunner | None = None
         self.base_url = ""
 
     async def start(self) -> None:
         app = web.Application()
-        app.router.add_get("/api/v1/offers/", self._offers)
+        app.router.add_get("/elektronika/telefony/q-{slug}/", self._search)
+        app.router.add_get("/q-{slug}/", self._search)
         app.router.add_post("/webhook", self._webhook)
         self._runner = web.AppRunner(app)
         await self._runner.setup()
@@ -169,15 +209,24 @@ class FakeServer:
         if self._runner is not None:
             await self._runner.cleanup()
 
-    async def _offers(self, request: web.Request) -> web.Response:
+    async def _search(self, request: web.Request) -> web.Response:
         self.last_offer_params = dict(request.query)
-        query = request.query.get("query", "").lower()
-        offset = int(request.query.get("offset", "0"))
-        if "iphone" not in query or offset > 0:
-            return web.json_response({"data": [], "metadata": {"promoted": []}})
-        return web.json_response(
-            {"data": self.offers, "metadata": {"promoted": PROMOTED_INDICES}}
+        self.last_request_path = request.path
+        slug = request.match_info.get("slug", "").lower()
+        page = int(request.query.get("page", "1"))
+        if "iphone" not in slug or page > 1:
+            return web.Response(
+                text=_render_search_html([]),
+                content_type="text/html",
+            )
+        return web.Response(
+            text=_render_search_html(self.offers),
+            content_type="text/html",
         )
+
+    async def _webhook(self, request: web.Request) -> web.Response:
+        self.webhook_payloads.append(await request.json())
+        return web.Response(status=204)
 
     async def _webhook(self, request: web.Request) -> web.Response:
         self.webhook_payloads.append(await request.json())
@@ -189,12 +238,13 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         webhook_url=f"{server.base_url}/webhook",
         discord_username="Test Bot",
         discord_rate_limit_seconds=0.0,
-        olx_base_url=f"{server.base_url}/api/v1/offers/",
+        olx_base_url=f"{server.base_url}/",
         olx_user_agent="test-agent",
         olx_region_id=None,
         olx_sort_by="created_at:desc",
         olx_include_promoted=False,
         olx_extra_params={},
+        olx_search_path_prefix="elektronika/telefony",
         poll_interval_seconds=0.1,
         jitter_seconds=0.0,
         max_backoff_seconds=1.0,
@@ -236,6 +286,7 @@ async def _run_cycles(
             session,
             base_url=monitor._config.olx_base_url,
             sort_by=monitor._config.olx_sort_by,
+            search_path_prefix=monitor._config.olx_search_path_prefix,
         )
         notifier = DiscordNotifier(
             session,
@@ -302,7 +353,11 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
     try:
         monitor = DealMonitor(_build_config(server, prime=False))
         async with aiohttp.ClientSession() as session:
-            olx = OlxClient(session, base_url=f"{server.base_url}/api/v1/offers/")
+            olx = OlxClient(
+                session,
+                base_url=f"{server.base_url}/",
+                search_path_prefix="elektronika/telefony",
+            )
             listings = await olx.search("iphone 13")
         by_id = {listing.id: listing for listing in listings}
         # Promoted 2006 filtered by the client already.
@@ -396,7 +451,8 @@ async def test_priming_suppresses_first_cycle() -> None:
         await _run_cycles(monitor, cycles=2, priming_first_cycle=True)
         assert server.webhook_payloads == [], server.webhook_payloads
         assert server.last_offer_params is not None
-        assert server.last_offer_params.get("sort_by") == "created_at:desc"
+        assert server.last_offer_params.get("search[order]") == "created_at:desc"
+        assert "/elektronika/telefony/q-iphone-13/" in server.last_request_path
         print("PASS: priming suppresses notifications on first + later cycles")
     finally:
         await server.stop()

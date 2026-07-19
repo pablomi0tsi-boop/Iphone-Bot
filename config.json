@@ -5,10 +5,11 @@
     "rate_limit_seconds": 0.5
   },
   "olx": {
-    "base_url": "https://www.olx.pl/api/v1/offers/",
-    "user_agent": "Mozilla/5.0 (compatible; PhoneDealBot/1.0)",
+    "base_url": "https://www.olx.pl/",
+    "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "region_id": null,
     "sort_by": "created_at:desc",
+    "search_path_prefix": "elektronika/telefony",
     "include_promoted": false,
     "extra_params": {},
     "poll_interval_seconds": 10,
