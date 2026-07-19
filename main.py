@@ -1,10 +1,19 @@
-"""Entry point for the OLX phone-deal monitor.
+"""Entry point for the OLX iPhone resale-deal monitor.
 
-The monitor continuously polls OLX for newly listed phones (iPhone, Samsung and
-Google Pixel by default), filters them against per-model rules loaded from
-``config.json``, estimates the resale profit, de-duplicates against a local
-SQLite database and pushes instant Discord webhook notifications for the deals
-worth acting on.
+The monitor continuously polls OLX for iPhone listings, parses each listing's
+model and storage capacity (from OLX's structured attributes and/or the title and
+description), matches it against the user's expected **resale price list** in
+``config.json``, and pushes an instant Discord webhook notification whenever::
+
+    profit = resale_price - listing_price
+
+exceeds ``min_profit`` (default: 1 PLN).
+
+Listings are ignored when:
+
+* they contain any blacklisted keyword (iCloud lock, damage, "for parts", ...),
+* the model or storage capacity cannot be determined confidently, or
+* no resale price is configured for the detected model + storage.
 
 Run it with::
 
@@ -13,13 +22,10 @@ Run it with::
 
 Architecture (tuned for low detection latency + stability):
 
-* Each search target runs its **own** independent polling loop, so a slow or
-  failing target never delays the others.
-* Each loop polls on a short base interval plus a small random **jitter**, and
-  applies **exponential back-off** on errors to stay stable if OLX throttles.
-* Detected deals are pushed onto an :class:`asyncio.Queue` and sent by a
-  dedicated notifier worker, so Discord latency/rate-limits never slow down
-  OLX polling (i.e. detection latency is decoupled from delivery latency).
+* Each search query runs its **own** independent polling loop with jitter and
+  exponential back-off, so a slow/failing query never blocks the others.
+* Detected deals are delivered by a dedicated notifier worker via an
+  :class:`asyncio.Queue`, decoupling detection latency from Discord latency.
 * De-duplication is batched (one query + one commit per poll).
 """
 
@@ -31,7 +37,7 @@ import logging
 import random
 import signal
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -40,56 +46,18 @@ import aiohttp
 from database import ListingDatabase
 from discord import DiscordNotifier
 from olx import Listing, OlxClient
+from pricing import PriceBook, detect_phone
 
 logger = logging.getLogger("phonedealbot")
 
-# Item pushed onto the notification queue.
-DealItem = Tuple[Listing, float, float, str]  # (listing, profit, max_buy, target_name)
+# Item pushed onto the notification queue:
+#   (listing, model, storage_gb, resale_price, profit, query)
+DealItem = Tuple[Listing, str, int, float, float, str]
 
 
 # --------------------------------------------------------------------------- #
 # Configuration model
 # --------------------------------------------------------------------------- #
-@dataclass(slots=True)
-class FeeConfig:
-    """Selling fees used when estimating profit."""
-
-    flat: float = 0.0
-    percentage: float = 0.0  # percent of the resale/market value, e.g. 10 == 10%
-
-
-@dataclass(slots=True)
-class Target:
-    """A single search target loaded from ``config.json``.
-
-    A target maps a search query to the economic rules used to decide whether a
-    matching listing is a good deal.
-    """
-
-    name: str
-    query: str
-    max_buy_price: float
-    market_value: float
-    keywords_any: List[str] = field(default_factory=list)
-    keywords_exclude: List[str] = field(default_factory=list)
-    min_expected_profit: Optional[float] = None
-    min_price: Optional[float] = None
-
-    def matches_title(self, title: str) -> bool:
-        """Return ``True`` if ``title`` passes the include/exclude keyword rules.
-
-        - If ``keywords_any`` is set, at least one must appear in the title.
-        - If any ``keywords_exclude`` term appears, the listing is rejected
-          (filters out cases, chargers, cracked screens, etc.).
-        """
-        lowered = title.lower()
-        if self.keywords_any and not any(k.lower() in lowered for k in self.keywords_any):
-            return False
-        if any(k.lower() in lowered for k in self.keywords_exclude):
-            return False
-        return True
-
-
 @dataclass(slots=True)
 class AppConfig:
     """Fully parsed application configuration."""
@@ -109,12 +77,12 @@ class AppConfig:
     request_timeout_seconds: float
     results_per_query: int
     pages_per_poll: int
+    search_queries: List[str]
     database_path: str
-    default_min_expected_profit: float
-    default_min_listing_price: float
-    fees: FeeConfig
+    min_profit: float
+    blacklist_keywords: List[str]
     prime_on_start: bool
-    targets: List[Target]
+    price_book: PriceBook
 
 
 def load_config(path: str | Path) -> AppConfig:
@@ -133,35 +101,20 @@ def load_config(path: str | Path) -> AppConfig:
     olx = raw.get("olx", {})
     discord_cfg = raw.get("discord", {})
     db_cfg = raw.get("database", {})
-    fees_cfg = raw.get("fees", {})
 
-    raw_targets = raw.get("targets", [])
-    if not raw_targets:
-        raise ValueError("config.json must define at least one entry in 'targets'")
+    resale_prices = raw.get("resale_prices")
+    if not isinstance(resale_prices, dict) or not resale_prices:
+        raise ValueError(
+            "config.json must define a non-empty 'resale_prices' object"
+        )
+    try:
+        price_book = PriceBook(resale_prices)
+    except ValueError as exc:
+        raise ValueError(f"Invalid 'resale_prices': {exc}") from exc
 
-    targets: List[Target] = []
-    for entry in raw_targets:
-        try:
-            targets.append(
-                Target(
-                    name=entry["name"],
-                    query=entry["query"],
-                    max_buy_price=float(entry["max_buy_price"]),
-                    market_value=float(entry["market_value"]),
-                    keywords_any=list(entry.get("keywords_any", [])),
-                    keywords_exclude=list(entry.get("keywords_exclude", [])),
-                    min_expected_profit=(
-                        float(entry["min_expected_profit"])
-                        if "min_expected_profit" in entry
-                        else None
-                    ),
-                    min_price=(
-                        float(entry["min_price"]) if "min_price" in entry else None
-                    ),
-                )
-            )
-        except (KeyError, TypeError, ValueError) as exc:
-            raise ValueError(f"Invalid target entry {entry!r}: {exc}") from exc
+    search_queries = [str(q) for q in olx.get("search_queries", []) if str(q).strip()]
+    if not search_queries:
+        raise ValueError("config.json must define a non-empty 'olx.search_queries'")
 
     return AppConfig(
         webhook_url=discord_cfg.get("webhook_url", ""),
@@ -181,15 +134,14 @@ def load_config(path: str | Path) -> AppConfig:
         request_timeout_seconds=float(olx.get("request_timeout_seconds", 15)),
         results_per_query=int(olx.get("results_per_query", 40)),
         pages_per_poll=max(1, int(olx.get("pages_per_poll", 1))),
+        search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
-        default_min_expected_profit=float(raw.get("min_expected_profit", 0)),
-        default_min_listing_price=float(raw.get("min_listing_price", 0)),
-        fees=FeeConfig(
-            flat=float(fees_cfg.get("flat", 0)),
-            percentage=float(fees_cfg.get("percentage", 0)),
-        ),
+        min_profit=float(raw.get("min_profit", 1)),
+        blacklist_keywords=[
+            str(k).lower() for k in raw.get("blacklist_keywords", [])
+        ],
         prime_on_start=bool(raw.get("prime_on_start", True)),
-        targets=targets,
+        price_book=price_book,
     )
 
 
@@ -197,7 +149,7 @@ def load_config(path: str | Path) -> AppConfig:
 # Monitor
 # --------------------------------------------------------------------------- #
 class DealMonitor:
-    """Coordinates OLX polling, filtering, de-duplication and notifications."""
+    """Coordinates OLX polling, matching, de-duplication and notifications."""
 
     def __init__(self, config: AppConfig) -> None:
         self._config = config
@@ -210,43 +162,42 @@ class DealMonitor:
         logger.info("Shutdown requested; stopping...")
         self._stop_event.set()
 
-    # -- economics ---------------------------------------------------------- #
-    def expected_profit(self, listing: Listing, target: Target) -> Optional[float]:
-        """Estimate resale profit for ``listing`` under ``target``'s economics.
+    # -- matching ----------------------------------------------------------- #
+    def is_blacklisted(self, listing: Listing) -> bool:
+        """Return ``True`` if the listing text contains a blacklisted keyword."""
+        text = listing.search_text
+        return any(keyword in text for keyword in self._config.blacklist_keywords)
 
-        ``profit = market_value - price - flat_fee - market_value * pct_fee``
+    def evaluate(self, listing: Listing) -> Optional[DealItem]:
+        """Evaluate a listing; return a :data:`DealItem` if it is a deal.
 
-        Returns ``None`` when the listing has no numeric price (can't evaluate).
+        Returns ``None`` (and the caller records it as seen) when the listing is
+        blacklisted, has no price, cannot be identified confidently, has no
+        configured resale price, or is not profitable enough.
         """
+        if self.is_blacklisted(listing):
+            return None
         if listing.price is None:
             return None
-        fees = self._config.fees
-        percentage_fee = target.market_value * (fees.percentage / 100.0)
-        return target.market_value - listing.price - fees.flat - percentage_fee
 
-    def is_good_deal(
-        self, listing: Listing, target: Target, profit: Optional[float]
-    ) -> bool:
-        """Return ``True`` when a listing meets the buy/profit thresholds."""
-        if listing.price is None or profit is None:
-            return False
-        # Guard against "swap"/parts listings priced at 0 (or suspiciously low),
-        # which would otherwise look like enormous fake profits.
-        min_price = (
-            target.min_price
-            if target.min_price is not None
-            else self._config.default_min_listing_price
+        spec = detect_phone(
+            listing.title,
+            listing.description,
+            model_hint=listing.model_hint,
+            storage_hint=listing.storage_hint,
         )
-        if listing.price < min_price:
-            return False
-        if listing.price > target.max_buy_price:
-            return False
-        threshold = (
-            target.min_expected_profit
-            if target.min_expected_profit is not None
-            else self._config.default_min_expected_profit
-        )
-        return profit >= threshold
+        if not spec.is_confident:
+            return None
+        assert spec.model is not None and spec.storage_gb is not None
+
+        resale = self._config.price_book.lookup(spec.model, spec.storage_gb)
+        if resale is None:
+            return None
+
+        profit = resale - listing.price
+        if profit <= self._config.min_profit:
+            return None
+        return (listing, spec.model, spec.storage_gb, resale, profit, "")
 
     # -- lifecycle ---------------------------------------------------------- #
     async def run(self) -> None:
@@ -259,8 +210,6 @@ class DealMonitor:
         existing = await self._db.count()
         start_primed = existing > 0 or not self._config.prime_on_start
 
-        # Connection tuning: reuse sockets and cache DNS to shave per-request
-        # latency across the many polls this app makes.
         connector = aiohttp.TCPConnector(
             limit=20,
             limit_per_host=10,
@@ -292,9 +241,10 @@ class DealMonitor:
                 )
 
             logger.info(
-                "Monitoring %d target(s) on %s | base interval %.0fs (+<=%.0fs jitter)"
-                "%s",
-                len(self._config.targets),
+                "Monitoring %d query(ies), %d resale price point(s) on %s | base "
+                "interval %.0fs (+<=%.0fs jitter)%s",
+                len(self._config.search_queries),
+                len(self._config.price_book),
                 self._config.olx_base_url,
                 self._config.poll_interval_seconds,
                 self._config.jitter_seconds,
@@ -304,9 +254,9 @@ class DealMonitor:
             worker = asyncio.create_task(self._notifier_worker(notifier))
             loops = [
                 asyncio.create_task(
-                    self._run_target_loop(target, olx_client, primed=start_primed)
+                    self._run_query_loop(query, olx_client, primed=start_primed)
                 )
-                for target in self._config.targets
+                for query in self._config.search_queries
             ]
             try:
                 await self._stop_event.wait()
@@ -314,16 +264,15 @@ class DealMonitor:
                 for task in loops:
                     task.cancel()
                 await asyncio.gather(*loops, return_exceptions=True)
-                # Let any queued notifications drain before shutting the worker.
                 await self._queue.join()
                 worker.cancel()
                 await asyncio.gather(worker, return_exceptions=True)
                 await self._db.close()
 
-    async def _run_target_loop(
-        self, target: Target, olx_client: OlxClient, *, primed: bool
+    async def _run_query_loop(
+        self, query: str, olx_client: OlxClient, *, primed: bool
     ) -> None:
-        """Independently poll a single target forever with jitter + back-off."""
+        """Independently poll a single query forever with jitter + back-off."""
         base = self._config.poll_interval_seconds
         backoff = 0.0
         local_primed = primed
@@ -331,18 +280,17 @@ class DealMonitor:
         while not self._stop_event.is_set():
             try:
                 listings = await olx_client.search(
-                    target.query,
+                    query,
                     limit=self._config.results_per_query,
                     pages=self._config.pages_per_poll,
                 )
                 await self._process_listings(
-                    target, listings, priming=not local_primed
+                    query, listings, priming=not local_primed
                 )
                 if not local_primed:
                     local_primed = True
                     logger.info(
-                        "[%s] priming complete; new listings will now notify",
-                        target.name,
+                        "[%s] priming complete; new listings will now notify", query
                     )
                 backoff = 0.0
             except asyncio.CancelledError:
@@ -353,10 +301,7 @@ class DealMonitor:
                     self._config.max_backoff_seconds,
                 )
                 logger.warning(
-                    "[%s] poll failed: %s (backing off %.0fs)",
-                    target.name,
-                    exc,
-                    backoff,
+                    "[%s] poll failed: %s (backing off %.0fs)", query, exc, backoff
                 )
 
             delay = (backoff if backoff else base) + random.uniform(
@@ -365,14 +310,9 @@ class DealMonitor:
             await self._sleep_or_stop(delay)
 
     async def _process_listings(
-        self, target: Target, listings: List[Listing], *, priming: bool
+        self, query: str, listings: List[Listing], *, priming: bool
     ) -> None:
-        """Filter, cost and enqueue new listings for a single poll result.
-
-        De-duplication is done in one batch query; all newly seen listings are
-        persisted in one commit; qualifying deals are queued (best profit first)
-        for the notifier worker to deliver.
-        """
+        """Match, cost and enqueue new listings for a single poll result."""
         if not listings:
             return
 
@@ -383,15 +323,14 @@ class DealMonitor:
             return
 
         records = []
-        deals: List[Tuple[Listing, float]] = []
+        deals: List[DealItem] = []
         for listing in new_listings:
-            notified = False
-            if target.matches_title(listing.title):
-                profit = self.expected_profit(listing, target)
-                if not priming and self.is_good_deal(listing, target, profit):
-                    assert profit is not None
-                    deals.append((listing, profit))
-                    notified = True
+            deal = self.evaluate(listing)
+            notified = deal is not None and not priming
+            if notified:
+                assert deal is not None
+                # Attach the originating query for logging.
+                deals.append(deal[:5] + (query,))
             records.append(
                 (
                     listing.id,
@@ -403,17 +342,16 @@ class DealMonitor:
                 )
             )
 
-        # Persist first so a crash can't cause the same deal to be re-notified.
         await self._db.mark_seen_many(records)
 
         # Deliver the most profitable deals first for lowest time-to-alert.
-        deals.sort(key=lambda item: item[1], reverse=True)
-        for listing, profit in deals:
-            await self._queue.put((listing, profit, target.max_buy_price, target.name))
+        deals.sort(key=lambda item: item[4], reverse=True)
+        for deal in deals:
+            await self._queue.put(deal)
 
         logger.info(
             "[%s] %d new listing(s), %d deal(s)%s",
-            target.name,
+            query,
             len(new_listings),
             len(deals),
             " (priming - not notified)" if priming else "",
@@ -422,17 +360,23 @@ class DealMonitor:
     async def _notifier_worker(self, notifier: DiscordNotifier) -> None:
         """Drain the deal queue and deliver notifications, one at a time."""
         while True:
-            listing, profit, max_buy, target_name = await self._queue.get()
+            listing, model, storage_gb, resale, profit, query = await self._queue.get()
             try:
                 sent = await notifier.send_deal(
-                    listing, expected_profit=profit, max_buy_price=max_buy
+                    listing,
+                    resale_price=resale,
+                    profit=profit,
+                    model=model,
+                    storage_gb=storage_gb,
                 )
                 if sent:
                     logger.info(
-                        "DEAL [%s] %s | price=%s | profit=%.2f | %s",
-                        target_name,
-                        listing.title,
+                        "DEAL [%s] %s %dGB | price=%s | resale=%.2f | profit=%.2f | %s",
+                        query,
+                        model,
+                        storage_gb,
                         listing.price,
+                        resale,
                         profit,
                         listing.url,
                     )
