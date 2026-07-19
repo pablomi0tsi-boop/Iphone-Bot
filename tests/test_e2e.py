@@ -427,6 +427,20 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             "2012": "profit below threshold",
             "2013": "listing older than 120s",
         }
+        expected_decisions = {
+            "2001": "SENT",
+            "2002": "REJECT_PROFIT",
+            "2003": "REJECT_OTHER",  # blacklist
+            "2004": "REJECT_MODEL",
+            "2005": "REJECT_MODEL",
+            "2007": "REJECT_OTHER",  # blacklist swap
+            "2008": "REJECT_PRICE",
+            "2009": "REJECT_OTHER",  # no photos
+            "2010": "REJECT_OTHER",  # business
+            "2011": "REJECT_ACCESSORY",
+            "2012": "REJECT_PROFIT",
+            "2013": "REJECT_OTHER",  # age
+        }
         for listing_id, reason_fragment in expected_reasons.items():
             listing = by_id[listing_id]
             match = next(
@@ -451,6 +465,31 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             assert "model=" in match and "storage=" in match
             assert "resale=" in match and "profit=" in match
 
+        for listing_id, decision in expected_decisions.items():
+            listing = by_id[listing_id]
+            match = next(
+                (
+                    msg
+                    for msg in log_capture.messages
+                    if (
+                        "Listing decision |" in msg
+                        and f"decision={decision}" in msg
+                        and f"id={listing.id}" in msg
+                        and f"title={listing.title!r}" in msg
+                        and f"price={listing.price}" in msg
+                        and "model=" in msg
+                        and "storage=" in msg
+                        and "profit=" in msg
+                        and "reason=" in msg
+                    )
+                ),
+                None,
+            )
+            assert match is not None, (
+                f"missing Listing decision for {listing_id} "
+                f"(expected decision={decision}): {log_capture.messages}"
+            )
+
         # Freshness debug log must include both datetime objects + UTC forms.
         age_logs = [
             msg for msg in log_capture.messages if msg.startswith("Listing timestamp |")
@@ -465,7 +504,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
             "no-photos / business / accessory / below-min-profit / stale-age ignored "
-            "(with rejection logs including OLX id + published_at)"
+            "(with rejection + Listing decision logs)"
         )
     finally:
         await server.stop()

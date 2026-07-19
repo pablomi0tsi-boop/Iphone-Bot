@@ -334,6 +334,63 @@ class DealMonitor:
         accessory keyword (checked against both title and description)."""
         return self.matching_filter_reason(listing) is not None
 
+    @staticmethod
+    def decision_code_for_reason(reason: str) -> str:
+        """Map an exact rejection reason to a stable decision code.
+
+        Diagnostics only — does not affect filtering. Codes::
+
+            REJECT_ACCESSORY, REJECT_MODEL, REJECT_PROFIT,
+            REJECT_PRICE, REJECT_DUPLICATE, REJECT_OTHER
+
+        ``SENT`` is logged explicitly on the accept path, not via this mapper.
+        """
+        text = (reason or "").strip()
+        lower = text.lower()
+        if (
+            text == "accessory filter"
+            or lower.startswith("accessory keyword")
+            or "accessory filter" in lower
+        ):
+            return "REJECT_ACCESSORY"
+        if text in {
+            "unknown model",
+            "unsupported storage",
+            "no configured resale price",
+        }:
+            return "REJECT_MODEL"
+        if lower.startswith("profit below threshold"):
+            return "REJECT_PROFIT"
+        if text in {"no price", "price <= 0"}:
+            return "REJECT_PRICE"
+        if "duplicate" in lower:
+            return "REJECT_DUPLICATE"
+        return "REJECT_OTHER"
+
+    def _log_decision(
+        self,
+        listing: Listing,
+        *,
+        decision: str,
+        reason: str,
+        model: Optional[str],
+        storage_gb: Optional[int],
+        profit: Optional[float],
+    ) -> None:
+        """Log exactly one decision code for an unseen listing (diagnostics)."""
+        logger.info(
+            "Listing decision | decision=%s | id=%s | title=%r | price=%s | "
+            "model=%s | storage=%s | profit=%s | reason=%s",
+            decision,
+            listing.id,
+            listing.title,
+            listing.price,
+            model,
+            storage_gb,
+            profit,
+            reason,
+        )
+
     def _log_rejection(
         self,
         listing: Listing,
@@ -356,6 +413,14 @@ class DealMonitor:
             resale,
             profit,
             reason,
+        )
+        self._log_decision(
+            listing,
+            decision=self.decision_code_for_reason(reason),
+            reason=reason,
+            model=model,
+            storage_gb=storage_gb,
+            profit=profit,
         )
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
@@ -487,6 +552,14 @@ class DealMonitor:
                 published_utc.isoformat() if published_utc else None,
                 listing.url,
             )
+            self._log_decision(
+                listing,
+                decision="SENT",
+                reason="debug_notify_all",
+                model=model,
+                storage_gb=storage_gb,
+                profit=profit,
+            )
             return (listing, model, storage_gb, resale, profit, "")
 
         filter_reason = self.matching_filter_reason(listing)
@@ -518,6 +591,17 @@ class DealMonitor:
                 f"({profit:.2f} < {self._config.minimum_profit:.2f})"
             )
             return None
+        self._log_decision(
+            listing,
+            decision="SENT",
+            reason=(
+                "profit meets threshold "
+                f"({profit:.2f} >= {self._config.minimum_profit:.2f})"
+            ),
+            model=model,
+            storage_gb=storage_gb,
+            profit=profit,
+        )
         return (listing, model, storage_gb, resale, profit, "")
 
     # -- lifecycle ---------------------------------------------------------- #
