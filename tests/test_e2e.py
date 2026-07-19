@@ -198,6 +198,7 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
                 "iPhone 13 Pro Max": {"256": 3050},
             }
         ),
+        debug_notify_all=False,
     )
 
 

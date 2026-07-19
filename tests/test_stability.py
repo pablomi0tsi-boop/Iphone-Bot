@@ -83,6 +83,7 @@ def test_config_defaults_and_minimum_profit() -> None:
         assert cfg.minimum_profit == 300.0  # documented default
         assert cfg.poll_interval_seconds == 10
         assert cfg.stats_interval_seconds == 600
+        assert cfg.debug_notify_all is False  # normal filtering by default
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
     print("PASS: config defaults + minimum_profit default (300)")
 

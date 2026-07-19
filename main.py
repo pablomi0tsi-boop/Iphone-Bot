@@ -51,7 +51,10 @@ logger = logging.getLogger("phonedealbot")
 
 # Item pushed onto the notification queue:
 #   (listing, model, storage_gb, resale_price, profit, query)
-DealItem = Tuple[Listing, str, int, float, float, str]
+# model / storage / resale / profit may be None in debug_notify_all mode.
+DealItem = Tuple[
+    Listing, Optional[str], Optional[int], Optional[float], Optional[float], str
+]
 
 
 # --------------------------------------------------------------------------- #
@@ -84,6 +87,9 @@ class AppConfig:
     accessory_keywords: List[str]
     prime_on_start: bool
     price_book: PriceBook
+    # TEMPORARY DEBUG: when True, skip all deal filters and notify on every
+    # new listing (model/storage/profit included when detectable).
+    debug_notify_all: bool = False
 
 
 @dataclass
@@ -189,6 +195,7 @@ def load_config(path: str | Path) -> AppConfig:
         ],
         prime_on_start=bool(raw.get("prime_on_start", True)),
         price_book=price_book,
+        debug_notify_all=bool(raw.get("debug_notify_all", False)),
     )
 
 
@@ -266,14 +273,18 @@ class DealMonitor:
         * has no configured resale price, or
         * profit is below ``minimum_profit``.
 
-        Every rejection is logged (never a silent ``return None``) with OLX id,
-        title, price, detected model/storage, calculated resale/profit, and the
-        exact reason.
+        When ``debug_notify_all`` is enabled, **all** filters are skipped and
+        every listing is returned for notification (model/storage/profit may be
+        ``None`` when undetectable). This is for debugging only.
+
+        Otherwise every rejection is logged (never a silent ``return None``)
+        with OLX id, title, price, detected model/storage, calculated
+        resale/profit, and the exact reason.
 
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
-        # Detect early so rejection logs can include model/storage/resale/profit
-        # even when an earlier filter (blacklist, photos, ...) rejects the ad.
+        # Detect early so rejection/debug logs can include model/storage/resale/
+        # profit even when an earlier filter would normally reject the ad.
         spec = detect_phone(
             listing.title,
             listing.description,
@@ -287,6 +298,22 @@ class DealMonitor:
         profit: Optional[float] = (
             resale - price if resale is not None and price is not None else None
         )
+
+        # TEMPORARY DEBUG: notify on every new listing; no filters / min profit.
+        if self._config.debug_notify_all:
+            logger.info(
+                "DEBUG notify-all | id=%s | title=%r | price=%s | model=%s | "
+                "storage=%s | resale=%s | profit=%s | url=%s",
+                listing.id,
+                listing.title,
+                listing.price,
+                model,
+                storage_gb,
+                resale,
+                profit,
+                listing.url,
+            )
+            return (listing, model, storage_gb, resale, profit, "")
 
         def reject(reason: str) -> None:
             self._log_rejection(
@@ -334,11 +361,17 @@ class DealMonitor:
         """Run the monitor until a stop is requested."""
         logger.info(
             "Starting OLX iPhone deal monitor | minimum_profit=%.2f PLN | "
-            "webhook=%s | db=%s",
+            "webhook=%s | db=%s | debug_notify_all=%s",
             self._config.minimum_profit,
             "configured" if self._config.webhook_url else "dry-run",
             self._config.database_path,
+            self._config.debug_notify_all,
         )
+        if self._config.debug_notify_all:
+            logger.warning(
+                "debug_notify_all is ENABLED — all deal filters are disabled; "
+                "every new listing will trigger a Discord notification"
+            )
         await self._db.connect()
 
         # Only prime (silently record the back-catalogue) on a genuinely fresh
@@ -494,7 +527,8 @@ class DealMonitor:
             if notified:
                 assert deal is not None
                 self._stats.deals_found += 1
-                self._stats.total_profit += deal[4]
+                if deal[4] is not None:
+                    self._stats.total_profit += deal[4]
                 # Attach the originating query for logging.
                 deals.append(deal[:5] + (query,))
             records.append(
@@ -511,7 +545,11 @@ class DealMonitor:
         await self._db.mark_seen_many(records)
 
         # Deliver the most profitable deals first for lowest time-to-alert.
-        deals.sort(key=lambda item: item[4], reverse=True)
+        # Listings without a calculable profit sort last.
+        deals.sort(
+            key=lambda item: item[4] if item[4] is not None else float("-inf"),
+            reverse=True,
+        )
         for deal in deals:
             await self._queue.put(deal)
 
@@ -538,8 +576,10 @@ class DealMonitor:
                 if sent:
                     self._stats.notifications_sent += 1
                     logger.info(
-                        "DEAL [%s] %s %dGB | price=%s | resale=%.2f | profit=%.2f | %s",
+                        "NOTIFY [%s] id=%s | model=%s | storage=%s | price=%s | "
+                        "resale=%s | profit=%s | %s",
                         query,
+                        listing.id,
                         model,
                         storage_gb,
                         listing.price,
