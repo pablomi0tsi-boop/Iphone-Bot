@@ -303,6 +303,9 @@ class DealMonitor:
         self._stop_event = asyncio.Event()
         self._queue: asyncio.Queue[DealItem] = asyncio.Queue()
         self._stats = Stats()
+        # Serialize unseen-calc → INSERT so concurrent query loops cannot
+        # insert IDs before another poll finishes its unseen snapshot.
+        self._db_poll_lock = asyncio.Lock()
 
     def request_stop(self) -> None:
         """Signal every polling loop to finish promptly and exit."""
@@ -797,9 +800,36 @@ class DealMonitor:
         and either per-unseen details or ``0 unseen listings`` with the decision
         site — so a rotating ``first10_ids`` that are all already primed is
         distinguishable from a parser that finds nothing new.
+
+        Concurrent query loops share one lock around unseen→insert so another
+        loop cannot INSERT mid-snapshot (which would make ``contains=True`` for
+        an ID that was still unseen at the start of this poll).
         """
+        async with self._db_poll_lock:
+            await self._process_listings_locked(
+                query, listings, priming=priming
+            )
+
+    async def _process_listings_locked(
+        self, query: str, listings: List[Listing], *, priming: bool
+    ) -> None:
+        """Unseen-calc → evaluate → INSERT body (caller holds ``_db_poll_lock``)."""
+        self._db.begin_poll(query)
+        try:
+            await self._process_listings_body(
+                query, listings, priming=priming
+            )
+        finally:
+            self._db.end_poll()
+
+    async def _process_listings_body(
+        self, query: str, listings: List[Listing], *, priming: bool
+    ) -> None:
         # --- Empty fetch --------------------------------------------------- #
         if not listings:
+            # No IDs to check; mark unseen computed with empty baseline so any
+            # accidental INSERT still goes through the gate cleanly.
+            self._db.mark_unseen_computed(set())
             if not priming:
                 logger.info(
                     "[%s] 0 unseen listings | "
@@ -811,37 +841,55 @@ class DealMonitor:
             return
 
         # --- Unseen computation MUST happen before any insert -------------- #
+        # INSERT is gated (begin_poll) until mark_unseen_computed below.
         ids = [listing.id for listing in listings]
         already_seen = await self._db.seen_subset(ids)
         new_listings = [
             listing for listing in listings if listing.id not in already_seen
         ]
         unseen_count = len(new_listings)  # frozen before any mark_seen_* call
+        # Unlock INSERT and freeze the pre-poll baseline used by contains().
+        self._db.mark_unseen_computed(already_seen)
 
-        # Correlate with the poll's first10_ids: contains? before insert.
+        # Correlate with the poll's first10_ids: contains? after unseen freeze,
+        # still before any INSERT for this poll.
         first10 = listings[:10]
         for listing in first10:
             contains = await self._db.contains(listing.id)
             in_subset = listing.id in already_seen
             logger.info(
                 "first10_id DB check (pre-insert) | query=%s | id=%s | "
-                "database.contains=%s | in_seen_subset=%s | agree=%s",
+                "database.contains=%s | in_seen_subset=%s | agree=%s | "
+                "db_path=%s",
                 query,
                 listing.id,
                 contains,
                 in_subset,
                 contains == in_subset,
+                self._db.path,
             )
+            if contains != in_subset:
+                logger.error(
+                    "first10_id DB mismatch | query=%s | id=%s | "
+                    "contains=%s | in_seen_subset=%s | "
+                    "note=baseline and live contains disagree — possible "
+                    "INSERT from another writer during this poll",
+                    query,
+                    listing.id,
+                    contains,
+                    in_subset,
+                )
 
         logger.info(
             "Unseen count (pre-insert) | query=%s | fetched=%d | "
             "already_in_db=%d | unseen=%d | priming=%s | "
-            "unseen_computed_before_insert=True",
+            "unseen_computed_before_insert=True | db_path=%s",
             query,
             len(listings),
             len(already_seen),
             unseen_count,
             priming,
+            self._db.path,
         )
 
         # Post-prime: explain 0-unseen vs rotating first10_ids.
@@ -925,7 +973,9 @@ class DealMonitor:
 
         # Inserts happen ONLY after unseen_count / pre-filter logs above.
         await self._db.mark_seen_many(records)
-        confirmed = await self._db.seen_subset([listing.id for listing in new_listings])
+        confirmed = await self._db.seen_subset(
+            [listing.id for listing in new_listings]
+        )
         for listing in new_listings:
             logger.info(
                 "Unseen listing | id=%s | title=%r | created_at=%s | price=%s | "

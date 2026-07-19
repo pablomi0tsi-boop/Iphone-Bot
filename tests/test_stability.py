@@ -67,6 +67,73 @@ async def test_db_recovers_from_corruption() -> None:
     print("PASS: corrupt database is quarantined and recreated")
 
 
+async def test_db_blocks_insert_before_unseen_and_logs_contains() -> None:
+    """INSERT before mark_unseen_computed is blocked; contains logs baseline."""
+    import logging
+
+    class Capture(logging.Handler):
+        def __init__(self) -> None:
+            super().__init__(level=logging.INFO)
+            self.messages: list[str] = []
+
+        def emit(self, record: logging.LogRecord) -> None:
+            self.messages.append(record.getMessage())
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / "listings.db"
+        db = ListingDatabase(str(path))
+        await db.connect()
+        capture = Capture()
+        db_logger = logging.getLogger("database")
+        db_logger.addHandler(capture)
+        previous = db_logger.level
+        db_logger.setLevel(logging.INFO)
+        try:
+            await db.mark_seen("seed", source="olx", title="seed", notified=False)
+            db.begin_poll("test-query")
+            try:
+                raised = False
+                try:
+                    await db.mark_seen(
+                        "premature", source="olx", title="too early", notified=False
+                    )
+                except RuntimeError as exc:
+                    raised = True
+                    assert "before unseen" in str(exc)
+                assert raised, "INSERT before unseen calc must raise"
+
+                baseline = await db.seen_subset(["seed", "fresh"])
+                db.mark_unseen_computed(baseline)
+                assert await db.contains("seed") is True
+                assert await db.contains("fresh") is False
+                await db.mark_seen(
+                    "fresh", source="olx", title="ok", notified=False
+                )
+            finally:
+                db.end_poll()
+        finally:
+            db_logger.removeHandler(capture)
+            db_logger.setLevel(previous)
+            await db.close()
+
+        contains_logs = [m for m in capture.messages if m.startswith("database.contains |")]
+        assert len(contains_logs) >= 2, capture.messages
+        seed_log = next(m for m in contains_logs if "id=seed" in m)
+        fresh_log = next(m for m in contains_logs if "id=fresh" in m)
+        assert f"path={path}" in seed_log or str(path) in seed_log
+        assert "row_count=" in seed_log
+        assert "existed_before_current_poll=True" in seed_log
+        assert "existed_before_current_poll=False" in fresh_log
+        insert_logs = [m for m in capture.messages if m.startswith("database.INSERT |")]
+        assert any("id=fresh" in m and "timestamp=" in m for m in insert_logs), (
+            capture.messages
+        )
+        assert any("INSERT_BEFORE_UNSEEN" in m for m in capture.messages), (
+            capture.messages
+        )
+    print("PASS: INSERT before unseen blocked; contains/INSERT instrumented")
+
+
 # --------------------------------------------------------------------------- #
 # Config validation
 # --------------------------------------------------------------------------- #
@@ -220,6 +287,7 @@ async def test_discord_retries_on_timeout() -> None:
 async def _main() -> None:
     await test_db_creates_nested_path()
     await test_db_recovers_from_corruption()
+    await test_db_blocks_insert_before_unseen_and_logs_contains()
     test_config_defaults_and_minimum_profit()
     test_listing_age_timezone_handling()
     test_config_rejects_invalid_json()
