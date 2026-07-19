@@ -310,15 +310,20 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
                 (
                     msg
                     for msg in log_capture.messages
-                    if f"title={listing.title!r}" in msg and "Rejected listing" in msg
+                    if (
+                        f"title={listing.title!r}" in msg
+                        and f"price={listing.price}" in msg
+                        and "Rejected listing" in msg
+                        and reason_fragment in msg
+                    )
                 ),
                 None,
             )
             assert match is not None, (
-                f"missing rejection log for {listing_id}: {log_capture.messages}"
+                f"missing rejection log for {listing_id} "
+                f"(expected reason containing {reason_fragment!r}): "
+                f"{log_capture.messages}"
             )
-            assert f"reason={reason_fragment}" in match or reason_fragment in match, match
-            assert f"price={listing.price}" in match
             assert "model=" in match and "storage=" in match
             assert "resale=" in match and "profit=" in match
 
