@@ -292,15 +292,23 @@ class DealMonitor:
         self._stop_event.set()
 
     # -- matching ----------------------------------------------------------- #
+    def matching_accessory_reason(self, listing: Listing) -> Optional[str]:
+        """Return ``\"accessory filter\"`` when title/description looks like an accessory."""
+        text = listing.search_text
+        for keyword in self._config.accessory_keywords:
+            if keyword and keyword in text:
+                return "accessory filter"
+        return None
+
     def matching_filter_reason(self, listing: Listing) -> Optional[str]:
         """Return the exact blacklist/accessory rejection reason, if any."""
         text = listing.search_text
         for keyword in self._config.blacklist_keywords:
             if keyword in text:
                 return f"blacklist keyword: {keyword!r}"
-        for keyword in self._config.accessory_keywords:
-            if keyword in text:
-                return f"accessory keyword: {keyword!r}"
+        accessory_reason = self.matching_accessory_reason(listing)
+        if accessory_reason is not None:
+            return accessory_reason
         return None
 
     def has_filtered_keyword(self, listing: Listing) -> bool:
@@ -350,9 +358,9 @@ class DealMonitor:
         * profit is below ``minimum_profit``.
 
         When ``debug_notify_all`` is enabled, deal-quality filters are skipped
-        but the publication-age gate still applies (only freshly published
-        listings notify). Model/storage/profit may be ``None`` when
-        undetectable.
+        but the publication-age gate and accessory filter still apply (only
+        freshly published non-accessory listings notify). Model/storage/profit
+        may be ``None`` when undetectable.
 
         Otherwise every rejection is logged (never a silent ``return None``)
         with OLX id, title, price, detected model/storage, calculated
@@ -438,7 +446,15 @@ class DealMonitor:
             )
             return None
 
-        # TEMPORARY DEBUG: notify on every fresh listing; no quality filters.
+        # Always reject accessories before any Discord notify (including
+        # debug_notify_all) — only listings that look like actual phones.
+        accessory_reason = self.matching_accessory_reason(listing)
+        if accessory_reason is not None:
+            reject(accessory_reason)
+            return None
+
+        # TEMPORARY DEBUG: notify on every fresh non-accessory listing;
+        # remaining deal-quality filters are skipped.
         if self._config.debug_notify_all:
             logger.info(
                 "DEBUG notify-all | id=%s | title=%r | price=%s | model=%s | "
@@ -500,8 +516,9 @@ class DealMonitor:
         )
         if self._config.debug_notify_all:
             logger.warning(
-                "debug_notify_all is ENABLED — all deal filters are disabled; "
-                "every new listing will trigger a Discord notification"
+                "debug_notify_all is ENABLED — deal-quality filters are disabled "
+                "(age + accessory filter still apply); every new non-accessory "
+                "listing will trigger a Discord notification"
             )
         await self._db.connect()
 

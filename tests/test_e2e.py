@@ -394,7 +394,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
             "2008": "price <= 0",
             "2009": "no photos",
             "2010": "business seller",
-            "2011": "accessory keyword: 'bateria'",
+            "2011": "accessory filter",
             "2012": "profit below threshold",
             "2013": "listing older than 120s",
         }

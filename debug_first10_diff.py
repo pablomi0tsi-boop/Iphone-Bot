@@ -44,8 +44,28 @@ async def _notify_new_id(
     index: int,
     previous_first10: List[str],
     current_first10: List[str],
+    accessory_keywords: List[str],
 ) -> None:
-    """Log ``NEW ID DETECTED`` and push the listing to Discord right away."""
+    """Log ``NEW ID DETECTED`` and push the listing to Discord right away.
+
+    Accessories are rejected before Discord with reason ``accessory filter``.
+    """
+    text = listing.search_text
+    for keyword in accessory_keywords:
+        if keyword and keyword in text:
+            logger.info(
+                "Rejected listing | id=%s | title=%r | price=%s | model=%s | "
+                "storage=%s | resale=%s | profit=%s | reason=accessory filter",
+                listing.id,
+                listing.title,
+                listing.price,
+                None,
+                None,
+                None,
+                None,
+            )
+            return
+
     logger.info(
         "NEW ID DETECTED | query=%r | id=%s | index=%d | title=%r | "
         "price=%s | created_at=%s | url=%s | prev_first10=%s | "
@@ -202,6 +222,7 @@ async def run(
                             index=index,
                             previous_first10=prev_ids,
                             current_first10=current_ids,
+                            accessory_keywords=config.accessory_keywords,
                         )
 
                 previous_first10[query] = current_ids
