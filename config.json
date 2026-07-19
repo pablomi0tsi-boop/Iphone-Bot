@@ -29,7 +29,7 @@
   "database": {
     "path": "listings.db"
   },
-  "minimum_profit": 300,
+  "minimum_profit": 1,
   "stats_interval_seconds": 600,
   "prime_on_start": true,
   "blacklist_keywords": [
