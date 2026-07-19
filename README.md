@@ -7,27 +7,27 @@ notifications for every profitable listing.
 
 ## Matching logic
 
-For each new listing:
+A listing is **ignored** when any of these hold:
 
-1. **Blacklist filter** — skipped if the title/description contains any
-   `blacklist_keywords` term (iCloud lock, `blokada`, `mdm`, `na części`,
-   `uszkodzony`, `zbity`, `czytaj opis`, `locked`, `for parts`, ...).
-2. **Model + storage detection** — from OLX's structured attributes
-   (`phonemodel`, `builtinmemory_phones`) when present, otherwise by parsing the
-   title then the description. **If the storage (or model) cannot be determined
-   unambiguously, the listing is ignored.**
-3. **Resale lookup** — the detected `model + storage` is looked up in
-   `resale_prices`. No configured price ⇒ ignored.
-4. **Profit** — `profit = resale_price − listing_price`. A Discord notification
-   is sent when `profit > min_profit` (default **1 PLN**). Deals are delivered
-   **highest-profit first**.
+- it is a paid **promoted ad** (dropped upstream via OLX `metadata.promoted`),
+- its title/description contains a `blacklist_keywords` term — including swap
+  words (`zamienię`, `zamiana`, `swap`, `wymiana`, `trade`) and condition/lock
+  words (`icloud`, `blokada`, `mdm`, `na części`, `uszkodzony`, `zbity`,
+  `czytaj opis`, `locked`, `for parts`),
+- its **price is `0`** (or missing),
+- it has **no photos** attached,
+- the seller is a **business account** (when OLX reports the seller type),
+- the **model or storage cannot be determined confidently** (structured OLX
+  attributes `phonemodel` / `builtinmemory_phones` first, then unambiguous
+  title/description parsing), or
+- no `resale_prices` entry exists for the detected `model + storage`.
 
-> ⚠️ **The `resale_prices` in `config.json` are EXAMPLE values.** Replace every
-> number with your own expected resale prices before relying on notifications.
+Otherwise the profit is `profit = resale_price − listing_price`, and a Discord
+notification is sent when `profit > min_profit` (default **1 PLN**). Deals are
+delivered **highest-profit first**.
 
-> ⚠️ OLX reports swap/trade ("Zamienię") listings with `price = 0`, which yields
-> `profit = resale`. Per spec every listing with `profit > 1` notifies, so these
-> appear as deals; add a price floor in your fork if you want to exclude them.
+> The `resale_prices` in `config.json` hold your configured PLN resale values;
+> keep them up to date as the market moves.
 
 ## Features
 

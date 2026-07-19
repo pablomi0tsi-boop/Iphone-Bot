@@ -172,12 +172,25 @@ class DealMonitor:
         """Evaluate a listing; return a :data:`DealItem` if it is a deal.
 
         Returns ``None`` (and the caller records it as seen) when the listing is
-        blacklisted, has no price, cannot be identified confidently, has no
-        configured resale price, or is not profitable enough.
+        filtered out. A listing is ignored when it:
+
+        * contains a blacklisted keyword (incl. swap terms like ``zamiana``),
+        * has no price or a price of ``0`` (swap/trade offers),
+        * has no photos attached,
+        * is posted by a business account (when OLX reports the seller type),
+        * cannot be identified (model/storage) confidently,
+        * has no configured resale price, or
+        * is not profitable enough.
+
+        Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
         if self.is_blacklisted(listing):
             return None
-        if listing.price is None:
+        if listing.price is None or listing.price <= 0:
+            return None
+        if listing.photo_count <= 0:
+            return None
+        if listing.is_business is True:
             return None
 
         spec = detect_phone(

@@ -38,6 +38,8 @@ def _offer(
     description: str = "",
     model_label: str | None = None,
     storage_label: str | None = None,
+    photos: int = 1,
+    business: bool = False,
     currency: str = "PLN",
 ) -> dict:
     """Build an OLX-API-shaped offer dict for the fake server."""
@@ -67,8 +69,12 @@ def _offer(
         "created_time": "2026-07-19T10:00:00+02:00",
         "description": description,
         "params": params,
+        "business": business,
         "location": {"city": {"name": "Warszawa"}, "region": {"name": "Mazowieckie"}},
-        "photos": [{"link": "https://example.com/{width}x{height}/pic.jpg"}],
+        "photos": [
+            {"link": "https://example.com/{width}x{height}/pic.jpg"}
+            for _ in range(photos)
+        ],
     }
 
 
@@ -76,7 +82,7 @@ def _offer(
 FAKE_OFFERS = [
     # organic deal via STRUCTURED hints: resale 1900 - 1200 = 700 profit
     _offer(2001, "iPhone 13 128GB idealny", 1200,
-           model_label="iPhone 13", storage_label="128GB"),
+           model_label="iPhone 13", storage_label="128GB", photos=3),
     # text-parsed, not profitable: resale(13 Pro Max/256)=3050 - 5000 < 0
     _offer(2002, "iPhone 13 Pro Max 256GB", 5000),
     # blacklisted (icloud) even though cheap
@@ -88,6 +94,18 @@ FAKE_OFFERS = [
     # PROMOTED look-alike deal -> must be skipped
     _offer(2006, "iPhone 13 128GB tanio", 100,
            model_label="iPhone 13", storage_label="128GB"),
+    # swap keyword ("zamiana") -> ignore even though otherwise a deal
+    _offer(2007, "iPhone 13 128GB zamiana", 500,
+           model_label="iPhone 13", storage_label="128GB", photos=3),
+    # price == 0 (swap/trade) -> ignore
+    _offer(2008, "iPhone 13 128GB", 0,
+           model_label="iPhone 13", storage_label="128GB", photos=3),
+    # no photos attached -> ignore
+    _offer(2009, "iPhone 13 128GB", 400,
+           model_label="iPhone 13", storage_label="128GB", photos=0),
+    # business/shop account -> ignore
+    _offer(2010, "iPhone 13 128GB", 400,
+           model_label="iPhone 13", storage_label="128GB", photos=3, business=True),
 ]
 PROMOTED_INDICES = [5]
 
@@ -147,7 +165,10 @@ def _build_config(server: FakeServer, *, prime: bool) -> AppConfig:
         search_queries=["iphone 13"],
         database_path=":memory:",
         min_profit=1.0,
-        blacklist_keywords=["icloud", "blokada", "uszkodzony", "na części"],
+        blacklist_keywords=[
+            "icloud", "blokada", "uszkodzony", "na części",
+            "zamienię", "zamiana", "swap", "wymiana", "trade",
+        ],
         prime_on_start=prime,
         price_book=PriceBook(
             {
@@ -223,7 +244,14 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         assert monitor.evaluate(by_id["2003"]) is None           # blacklisted
         assert monitor.evaluate(by_id["2004"]) is None           # no storage
         assert monitor.evaluate(by_id["2005"]) is None           # unknown model
-        print("PASS: blacklist / unknown storage / unknown model / unprofitable ignored")
+        assert monitor.evaluate(by_id["2007"]) is None           # swap keyword
+        assert monitor.evaluate(by_id["2008"]) is None           # price == 0
+        assert monitor.evaluate(by_id["2009"]) is None           # no photos
+        assert monitor.evaluate(by_id["2010"]) is None           # business account
+        print(
+            "PASS: blacklist / no-storage / unknown-model / unprofitable / swap / "
+            "zero-price / no-photos / business ignored"
+        )
     finally:
         await server.stop()
 
