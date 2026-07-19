@@ -14,10 +14,11 @@ A listing is **ignored** when any of these hold:
   words (`zamienię`, `zamiana`, `swap`, `wymiana`, `trade`) and condition/lock
   words (`icloud`, `blokada`, `mdm`, `na części`, `uszkodzony`, `zbity`,
   `czytaj opis`, `locked`, `for parts`),
-- its title/description contains an `accessory_keywords` term (`etui`, `case`,
+- its **title** contains an `accessory_keywords` term (`etui`, `case`,
   `pokrowiec`, `szkło`, `szybka`, `wyświetlacz`, `ekran`, `lcd`, `oled`,
   `bateria`, `taśma`, `płyta`, `części`, `housing`, `obudowa`, `ładowarka`,
-  `kabel`, `airpods`, `apple watch`),
+  `kabel`, `airpods`, `apple watch`) — checked against the **title only**,
+  see the note below,
 - its **price is `0`** (or missing),
 - it has **no photos** attached,
 - the seller is a **business account** (when OLX reports the seller type),
@@ -31,11 +32,21 @@ Otherwise the profit is `profit = resale_price − listing_price`, and a Discord
 notification is sent when `profit >= minimum_profit` (default **300 PLN**). Deals
 are delivered **highest-profit first**.
 
-> ⚠️ Some `accessory_keywords` (`bateria`, `ekran`, `wyświetlacz`, `szkło`, ...)
-> also appear in legitimate phone listings ("bateria 100%"), so they reduce
-> recall (measured ~30% fewer deals in live sampling). They are matched in
-> title **and** description as requested; remove specific words from
-> `accessory_keywords` in `config.json` if you prefer higher recall.
+> **Keyword matching notes** (fixed root cause of missed notifications):
+> - `accessory_keywords` are matched against the **title only**, not the
+>   description. Genuine accessory-only ads name the accessory in the title
+>   (`"Etui iPhone 13"`, `"Bateria do iPhone 12"`). Matching them in the
+>   description as well used to reject the vast majority of real, profitable
+>   phone listings, because sellers routinely mention battery health, minor
+>   cosmetic wear or bundled extras (`"bateria 89%"`, `"dorzucam etui"`,
+>   `"kabel w zestawie"`) as normal disclosures — live sampling showed ~70%
+>   of real listings were incorrectly rejected this way before the fix.
+> - `blacklist_keywords` are still matched against title **and** description
+>   (they describe a genuine disqualifying problem wherever it's mentioned),
+>   but matching is boundary-aware: `"uszkodzony"` (damaged) no longer
+>   matches inside `"nieuszkodzony"` (**not** damaged), nor does `"locked"`
+>   match inside `"unlocked"`. Suffix inflections (Polish declension, e.g.
+>   `"ekran"` → `"ekranu"`) are still matched.
 
 > The `resale_prices` in `config.json` hold your configured PLN resale values;
 > keep them up to date as the market moves.

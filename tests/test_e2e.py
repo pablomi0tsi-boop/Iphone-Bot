@@ -114,6 +114,20 @@ FAKE_OFFERS = [
     # below minimum_profit (resale 1900 - 1750 = 150 < 300) -> ignore
     _offer(2012, "iPhone 13 128GB", 1750,
            model_label="iPhone 13", storage_label="128GB", photos=3),
+    # REGRESSION: accessory words in the DESCRIPTION of an ordinary phone sale
+    # (battery health + bundled extras) must NOT disqualify a real deal.
+    # resale 1900 - 1300 = 600 profit.
+    _offer(2013, "iPhone 13 128GB super stan", 1300,
+           description="Bateria 89% kondycji. Dorzucam etui i kabel w zestawie.",
+           model_label="iPhone 13", storage_label="128GB", photos=3),
+    # REGRESSION: "nieuszkodzony" (NOT damaged) must not match the blacklisted
+    # "uszkodzony" (damaged). resale 2100 - 1800 = 300 profit (== minimum).
+    _offer(2014, "iPhone 13 256GB nieuszkodzony", 1800,
+           description="Telefon calkowicie nieuszkodzony, wszystko sprawne.",
+           model_label="iPhone 13", storage_label="256GB", photos=3),
+    # Genuine accessory-only ad (keyword IS in the title) -> still ignored.
+    _offer(2015, "Etui iPhone 13 128GB oryginalne", 50,
+           model_label="iPhone 13", storage_label="128GB", photos=3),
 ]
 PROMOTED_INDICES = [5]
 
@@ -216,33 +230,63 @@ async def _run_cycles(
 
 
 async def test_full_matching_pipeline() -> None:
-    """Only the single profitable, non-blacklisted, identifiable organic listing
-    notifies; everything else is filtered; a second cycle de-dupes."""
+    """The profitable, non-blacklisted, identifiable organic listings notify
+    (including ones whose description merely mentions battery/accessory
+    words, or "nieuszkodzony"); everything else is filtered; a second cycle
+    de-dupes."""
     server = FakeServer()
     await server.start()
     try:
         monitor = DealMonitor(_build_config(server, prime=False))
         await _run_cycles(monitor, cycles=2, priming_first_cycle=False)
 
-        assert len(server.webhook_payloads) == 1, (
-            f"expected exactly 1 webhook, got {len(server.webhook_payloads)}"
+        assert len(server.webhook_payloads) == 3, (
+            f"expected exactly 3 webhooks, got {len(server.webhook_payloads)}"
         )
-        embed = server.webhook_payloads[0]["embeds"][0]
+        by_profit = {}
+        for payload in server.webhook_payloads:
+            fields = {f["name"]: f["value"] for f in payload["embeds"][0]["fields"]}
+            by_profit[fields["📈 Expected profit"]] = (payload, fields)
+
+        embed, fields = by_profit["700.00 PLN"][0]["embeds"][0], by_profit["700.00 PLN"][1]
         assert embed["title"] == "🔥 DEAL FOUND", embed["title"]
-        fields = {f["name"]: f["value"] for f in embed["fields"]}
         assert fields["📱 Model"] == "iPhone 13", fields
         assert fields["💾 Storage"] == "128GB", fields
-        assert fields["📈 Expected profit"].startswith("700.00"), fields  # 1900 - 1200
         assert fields["🏷️ My resale price"].startswith("1900.00"), fields
         assert fields["👤 Seller name"] == "Jan K", fields
         assert "Open on OLX" in fields["🔗 Link"], fields
+
+        # id 2013: profit 600 (1900 - 1300) despite "bateria"/"etui"/"kabel"
+        # appearing in the DESCRIPTION.
+        assert "600.00 PLN" in by_profit, by_profit.keys()
+
+        # id 2014: profit 300 (2100 - 1800, == minimum_profit) despite
+        # "nieuszkodzony" appearing in the description.
+        assert "300.00 PLN" in by_profit, by_profit.keys()
+
         # Stats counters updated.
-        assert monitor._stats.deals_found == 1, monitor._stats
-        assert monitor._stats.notifications_sent == 1, monitor._stats
-        assert monitor._stats.average_profit == 700.0, monitor._stats
-        print("PASS: full pipeline notifies only the valid profitable deal, de-dupes")
+        assert monitor._stats.deals_found == 3, monitor._stats
+        assert monitor._stats.notifications_sent == 3, monitor._stats
+        assert monitor._stats.average_profit == pytest_approx(
+            (700.0 + 600.0 + 300.0) / 3
+        ), monitor._stats
+        print(
+            "PASS: full pipeline notifies every valid profitable deal "
+            "(including description-only battery/accessory mentions and "
+            "nieuszkodzony), de-dupes"
+        )
     finally:
         await server.stop()
+
+
+def pytest_approx(value: float, tol: float = 1e-6):
+    """Tiny float-equality helper (avoids depending on pytest.approx here)."""
+
+    class _Approx:
+        def __eq__(self, other):
+            return abs(other - value) < tol
+
+    return _Approx()
 
 
 async def test_blacklist_and_unknowns_are_ignored() -> None:
@@ -269,9 +313,19 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         assert monitor.evaluate(by_id["2010"]) is None           # business account
         assert monitor.evaluate(by_id["2011"]) is None           # accessory keyword
         assert monitor.evaluate(by_id["2012"]) is None           # below minimum_profit
+        # REGRESSION: accessory words in the description of a real phone sale
+        # (battery %, bundled etui/kabel) must NOT be treated as an
+        # accessory-only listing.
+        assert monitor.evaluate(by_id["2013"]) is not None
+        # REGRESSION: "nieuszkodzony" (undamaged) must not match "uszkodzony".
+        assert monitor.evaluate(by_id["2014"]) is not None
+        # Accessory keyword actually IN THE TITLE is still ignored.
+        assert monitor.evaluate(by_id["2015"]) is None
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
-            "no-photos / business / accessory / below-min-profit ignored"
+            "no-photos / business / accessory (title) / below-min-profit ignored; "
+            "description-only battery/accessory mentions and negated keywords "
+            "(nieuszkodzony) no longer false-positive"
         )
     finally:
         await server.stop()

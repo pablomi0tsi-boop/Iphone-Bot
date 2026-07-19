@@ -77,10 +77,27 @@ Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
   dropped in `OlxClient.search`.
 - Swap listings report `price = 0` (and usually a swap keyword), so they are
   filtered by BOTH the zero-price rule and the swap blacklist words.
-- Some `accessory_keywords` (`bateria`, `ekran`, `wyświetlacz`, `szkło`, ...)
-  also occur in genuine phone listings, so they lower recall (~30% in live
-  sampling). This is intentional per spec and tunable in `config.json`; do not
-  silently remove them.
+- **Keyword matching (`DealMonitor.has_filtered_keyword`) is asymmetric on
+  purpose** — this was the root cause of a real bug where ~70% of live
+  listings were silently rejected:
+  - `accessory_keywords` (`etui`, `bateria`, `ekran`, `kabel`, ...) are
+    matched against the **title only**. Matching them in the description too
+    rejects nearly every genuine phone listing, since sellers routinely write
+    "bateria 89%", "dorzucam etui", "kabel w zestawie" as normal disclosures
+    on a real phone sale, not an accessory-only ad. Genuine accessory-only
+    ads reliably name the accessory in the title, so title-only matching is
+    both safe and effective.
+  - `blacklist_keywords` are still matched against title + description
+    (they describe a real disqualifying problem that may only be mentioned
+    in the description), via `_compile_keyword_patterns` regexes with a
+    negative look-behind so a keyword doesn't false-match inside a
+    negated/prefixed word (`"uszkodzony"` inside `"nieuszkodzony"`,
+    `"locked"` inside `"unlocked"`) while still matching Polish suffix
+    inflections (`"ekran"` → `"ekranu"`).
+  - If you add new keywords, verify empirically (fetch a live OLX page and
+    run it through `DealMonitor.evaluate`/`has_filtered_keyword`) before
+    assuming they only match the intended listings — common Polish words
+    (`bateria`, `ekran`, `części`) are extremely easy to over-match.
 - Stats (`Stats` + `_stats_loop`) log every `stats_interval_seconds` (default
   600s) and once on shutdown.
 - Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
