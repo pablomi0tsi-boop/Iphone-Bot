@@ -237,10 +237,11 @@ class DealMonitor:
         resale: Optional[float],
         profit: Optional[float],
     ) -> None:
-        """Emit a debug line for a filtered-out listing with full context."""
-        logger.debug(
-            "Rejected listing | title=%r | price=%s | model=%s | storage=%s | "
-            "resale=%s | profit=%s | reason=%s",
+        """Log a filtered-out listing with full context (never silent)."""
+        logger.info(
+            "Rejected listing | id=%s | title=%r | price=%s | model=%s | "
+            "storage=%s | resale=%s | profit=%s | reason=%s",
+            listing.id,
             listing.title,
             listing.price,
             model,
@@ -265,8 +266,9 @@ class DealMonitor:
         * has no configured resale price, or
         * profit is below ``minimum_profit``.
 
-        Every rejection is logged at DEBUG with title, price, detected
-        model/storage, calculated resale/profit, and the exact reason.
+        Every rejection is logged (never a silent ``return None``) with OLX id,
+        title, price, detected model/storage, calculated resale/profit, and the
+        exact reason.
 
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """

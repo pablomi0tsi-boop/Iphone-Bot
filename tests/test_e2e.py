@@ -31,11 +31,11 @@ from olx import OlxClient  # noqa: E402
 from pricing import PriceBook  # noqa: E402
 
 
-class _DebugLogCapture(logging.Handler):
-    """Collect formatted DEBUG log records for assertion."""
+class _LogCapture(logging.Handler):
+    """Collect log records for assertion."""
 
     def __init__(self) -> None:
-        super().__init__(level=logging.DEBUG)
+        super().__init__(level=logging.INFO)
         self.messages: list[str] = []
 
     def emit(self, record: logging.LogRecord) -> None:
@@ -271,11 +271,11 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         # Promoted 2006 filtered by the client already.
         assert "2006" not in by_id, "promoted listing should be filtered by client"
 
-        log_capture = _DebugLogCapture()
+        log_capture = _LogCapture()
         main_logger = logging.getLogger("phonedealbot")
         main_logger.addHandler(log_capture)
         previous_level = main_logger.level
-        main_logger.setLevel(logging.DEBUG)
+        main_logger.setLevel(logging.INFO)
         try:
             assert monitor.evaluate(by_id["2001"]) is not None       # good deal
             assert monitor.evaluate(by_id["2002"]) is None           # not profitable
@@ -311,7 +311,8 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
                     msg
                     for msg in log_capture.messages
                     if (
-                        f"title={listing.title!r}" in msg
+                        f"id={listing.id}" in msg
+                        and f"title={listing.title!r}" in msg
                         and f"price={listing.price}" in msg
                         and "Rejected listing" in msg
                         and reason_fragment in msg
@@ -330,7 +331,7 @@ async def test_blacklist_and_unknowns_are_ignored() -> None:
         print(
             "PASS: blacklist / no-storage / unknown-model / swap / zero-price / "
             "no-photos / business / accessory / below-min-profit ignored "
-            "(with debug rejection logs)"
+            "(with rejection logs including OLX id)"
         )
     finally:
         await server.stop()
