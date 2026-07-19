@@ -110,6 +110,16 @@ class DiscordNotifier:
             return f"{storage_gb // 1024}TB"
         return f"{storage_gb}GB"
 
+    @staticmethod
+    def _format_profit_loss(profit: float) -> str:
+        """Signed PLN label, e.g. ``+150.00 zł`` or ``-50.00 zł``.
+
+        There is no minimum-profit filter upstream, so this can legitimately
+        be negative (a loss) -- the sign always makes that explicit.
+        """
+        sign = "+" if profit >= 0 else "-"
+        return f"{sign}{abs(profit):.2f} zł"
+
     def _build_payload(
         self,
         listing: "Listing",
@@ -131,7 +141,7 @@ class DiscordNotifier:
                 "inline": True,
             },
             {
-                "name": "💰 Listing price",
+                "name": "💵 Listing price",
                 "value": price_text,
                 "inline": True,
             },
@@ -141,8 +151,8 @@ class DiscordNotifier:
                 "inline": True,
             },
             {
-                "name": "📈 Expected profit",
-                "value": f"{profit:.2f}{currency}",
+                "name": "💰 Zysk/Strata",
+                "value": self._format_profit_loss(profit),
                 "inline": True,
             },
             {

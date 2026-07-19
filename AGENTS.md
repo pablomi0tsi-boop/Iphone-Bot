@@ -3,9 +3,12 @@
 ## Cursor Cloud specific instructions
 
 Python `asyncio` OLX iPhone resale-deal monitor. Single service, CLI/headless
-(no GUI). Flow: poll OLX per `search_queries` → drop promoted → blacklist filter
-→ detect model+storage (`pricing.py`) → look up `resale_prices` → notify when
-`profit = resale − listing_price > min_profit` (default 1).
+(no GUI). Flow: poll OLX per `search_queries` → drop promoted → blacklist/
+accessory keyword filter → detect model+storage (`pricing.py`) → look up
+`resale_prices` → notify for **every** recognized listing, showing
+`profit_or_loss = resale − listing_price` (can be negative). There is
+deliberately **no minimum-profit threshold** — do not reintroduce one without
+an explicit user request; it was removed on purpose (see below).
 
 ### Environment
 - Python 3.12. Dependencies live in `requirements.txt` (`aiohttp`, `aiosqlite`).
@@ -95,9 +98,12 @@ stay at exactly 0 while `fetched N offer(s)...` lines show `N > 0` and
   buy decisions, so never invent them.
 - Deal filtering (in `DealMonitor.evaluate`) ignores: blacklist + accessory
   keyword hits, `price <= 0`, no photos, business-account sellers
-  (`Listing.is_business is True`), unconfident model/storage, and
-  `profit < minimum_profit` (default 300, `>=` to notify). Promoted ads are
-  dropped in `OlxClient.search`.
+  (`Listing.is_business is True`), unconfident model/storage, and no configured
+  `resale_prices` entry. Promoted ads are dropped in `OlxClient.search`.
+  **There is no profit-based filter** — every listing that survives the above
+  notifies, whether `profit_or_loss = resale − price` is positive or negative.
+  `discord.py`'s `💰 Zysk/Strata` field always shows the sign explicitly
+  (`+X zł` / `-X zł`); `Stats.average_profit` can legitimately be negative.
 - Swap listings report `price = 0` (and usually a swap keyword), so they are
   filtered by BOTH the zero-price rule and the swap blacklist words.
 - **Keyword matching (`DealMonitor.has_filtered_keyword`) is asymmetric on

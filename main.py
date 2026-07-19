@@ -3,20 +3,23 @@
 The monitor continuously polls OLX for iPhone listings, parses each listing's
 model and storage capacity (from OLX's structured attributes and/or the title and
 description), matches it against the user's expected **resale price list** in
-``config.json``, and pushes an instant Discord webhook notification whenever::
+``config.json``, and pushes an instant Discord webhook notification for
+**every** new, correctly identified listing::
 
-    profit = resale_price - listing_price
+    profit_or_loss = resale_price - listing_price
 
-is at least ``minimum_profit`` (default: 300 PLN).
+There is no minimum-profit threshold -- the Discord message always shows the
+resulting profit/loss (``+X zł`` or ``-X zł``), even when it is negative.
 
 Listings are ignored when the title/description contains a blacklisted keyword
 (``icloud``, ``uszkodzony``, swap terms, ...) or the *title* contains an
 accessory keyword (``etui``, ``bateria``, ``kabel``, ...); when there is no
 price or a price of ``0``; when there are no photos; when the seller is a
 business account; or when the model/storage cannot be determined confidently
-(or has no configured resale price). Keyword matching is boundary-aware so
-negated/prefixed words (``"nieuszkodzony"``, ``"unlocked"``) do not trigger a
-match meant for the opposite word (``"uszkodzony"``, ``"locked"``).
+(or has no configured resale price, since a profit/loss cannot be computed
+without one). Keyword matching is boundary-aware so negated/prefixed words
+(``"nieuszkodzony"``, ``"unlocked"``) do not trigger a match meant for the
+opposite word (``"uszkodzony"``, ``"locked"``).
 
 Run it with::
 
@@ -107,7 +110,6 @@ class AppConfig:
     pages_per_poll: int
     search_queries: List[str]
     database_path: str
-    minimum_profit: float
     stats_interval_seconds: float
     blacklist_keywords: List[str]
     accessory_keywords: List[str]
@@ -204,9 +206,6 @@ def load_config(path: str | Path) -> AppConfig:
         pages_per_poll=max(1, int(_number(olx, "pages_per_poll", 1, minimum=1))),
         search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
-        minimum_profit=_number(
-            raw, "minimum_profit", float(raw.get("min_profit", 300))
-        ),
         stats_interval_seconds=_number(
             raw, "stats_interval_seconds", 600, minimum=0
         ),
@@ -266,10 +265,13 @@ class DealMonitor:
         return any(pattern.search(title_text) for pattern in self._accessory_patterns)
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
-        """Evaluate a listing; return a :data:`DealItem` if it is a deal.
+        """Evaluate a listing; return a :data:`DealItem` if it should notify.
 
-        Returns ``None`` (and the caller records it as seen) when the listing is
-        filtered out. A listing is ignored when it:
+        There is **no minimum-profit threshold** -- every new, correctly
+        identified iPhone listing notifies, whether it would be profitable or
+        not (the Discord message shows the resulting profit/loss either way).
+        Returns ``None`` (and the caller records it as seen) when the listing
+        is filtered out. A listing is ignored when it:
 
         * contains a blacklisted keyword anywhere (swap terms, ``icloud``,
           ``uszkodzony``, ...) or an accessory keyword in the *title*
@@ -278,9 +280,8 @@ class DealMonitor:
         * has no price or a price of ``0`` (swap/trade offers),
         * has no photos attached,
         * is posted by a business account (when OLX reports the seller type),
-        * cannot be identified (model/storage) confidently,
-        * has no configured resale price, or
-        * profit is below ``minimum_profit``.
+        * cannot be identified (model/storage) confidently, or
+        * has no configured resale price (needed to compute profit/loss).
 
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
@@ -322,14 +323,6 @@ class DealMonitor:
             return None
 
         profit = resale - listing.price
-        if profit < self._config.minimum_profit:
-            self._log_rejection(
-                listing,
-                f"profit {profit:.2f} PLN below minimum_profit "
-                f"{self._config.minimum_profit:.2f} PLN "
-                f"(resale={resale:.2f}, price={listing.price:.2f})",
-            )
-            return None
         return (listing, spec.model, spec.storage_gb, resale, profit, "")
 
     @staticmethod
@@ -349,9 +342,8 @@ class DealMonitor:
     async def run(self) -> None:
         """Run the monitor until a stop is requested."""
         logger.info(
-            "Starting OLX iPhone deal monitor | minimum_profit=%.2f PLN | "
-            "webhook=%s | db=%s",
-            self._config.minimum_profit,
+            "Starting OLX iPhone deal monitor | no minimum-profit filter "
+            "(every recognized listing notifies) | webhook=%s | db=%s",
             "configured" if self._config.webhook_url else "dry-run",
             self._config.database_path,
         )
