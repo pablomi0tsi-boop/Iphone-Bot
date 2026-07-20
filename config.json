@@ -13,10 +13,10 @@
     "extra_params": {},
     "poll_interval_seconds": 10,
     "jitter_seconds": 2,
-    "max_backoff_seconds": 300,
+    "max_backoff_seconds": 60,
     "request_timeout_seconds": 15,
     "results_per_query": 40,
-    "pages_per_poll": 1,
+    "pages_per_poll": 2,
     "search_queries": [
       "iphone 11",
       "iphone 12",

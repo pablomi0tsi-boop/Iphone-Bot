@@ -108,6 +108,12 @@ notice. Verified limitations that shape latency:
 - **Polling cadence bounds latency.** Expected delay ≈ `poll_interval/2` +
   request time (~0.4–0.5 s) + Discord POST (~0.2–0.5 s) + OLX index lag. With
   the default 10 s interval that is typically ~5–11 s plus index lag.
+- **Pagination.** Default `pages_per_poll` is `2` (40 results × 2 offsets) so
+  detection is not limited to the first raw API page. `max_backoff_seconds`
+  defaults to `60` so a failed poll cannot silence a query for minutes.
+- **Discord delivery.** Deals are claimed as `pending` before enqueue and marked
+  `sent` only after a confirmed webhook success; failures are retried (no
+  permanent miss). Concurrent claims on the same listing id are atomic.
 - **Rate-limit risk.** Polling too aggressively from one IP risks throttling or
   a temporary block; back-off keeps the monitor stable when that happens.
 
