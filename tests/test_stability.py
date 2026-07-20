@@ -83,6 +83,8 @@ def test_config_defaults() -> None:
         assert not hasattr(cfg, "minimum_profit")  # filter removed by design
         assert cfg.poll_interval_seconds == 10
         assert cfg.stats_interval_seconds == 600
+        assert cfg.max_backoff_seconds == 60
+        assert cfg.pages_per_poll == 2
         assert cfg.price_book.lookup("iPhone 13", 128) == 900.0
     print("PASS: config defaults (no minimum-profit filter)")
 

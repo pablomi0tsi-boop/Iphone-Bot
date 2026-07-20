@@ -46,7 +46,7 @@ import signal
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Pattern, Tuple
+from typing import Any, Dict, List, Optional, Pattern, Set, Tuple
 
 import aiohttp
 
@@ -60,6 +60,15 @@ logger = logging.getLogger("phonedealbot")
 # Item pushed onto the notification queue:
 #   (listing, model, storage_gb, resale_price, profit, query)
 DealItem = Tuple[Listing, str, int, float, float, str]
+
+# After this many failed Discord attempts a pending row stays in the DB for the
+# background retry loop (never permanently abandoned as "sent").
+_MAX_NOTIFY_ATTEMPTS = 20
+# Immediate re-queue attempts inside the notifier worker before deferring to
+# the background pending scanner.
+_MAX_INLINE_REQUEUES = 5
+# How often to re-scan the DB for pending (failed) notifications.
+_PENDING_RETRY_INTERVAL_SECONDS = 30.0
 
 # Polish letters treated as "word characters" for the keyword-boundary check
 # below (spelled out explicitly so the intent is unambiguous regardless of
@@ -198,12 +207,16 @@ def load_config(path: str | Path) -> AppConfig:
         olx_extra_params=dict(olx.get("extra_params", {})),
         poll_interval_seconds=_number(olx, "poll_interval_seconds", 10, minimum=1),
         jitter_seconds=_number(olx, "jitter_seconds", 2, minimum=0),
-        max_backoff_seconds=_number(olx, "max_backoff_seconds", 300, minimum=1),
+        # Cap OLX poll back-off at 60s (was 300) so a transient failure cannot
+        # silence a query for up to five minutes.
+        max_backoff_seconds=_number(olx, "max_backoff_seconds", 60, minimum=1),
         request_timeout_seconds=_number(
             olx, "request_timeout_seconds", 15, minimum=1
         ),
         results_per_query=max(1, int(_number(olx, "results_per_query", 40, minimum=1))),
-        pages_per_poll=max(1, int(_number(olx, "pages_per_poll", 1, minimum=1))),
+        # Default to 2 pages so detection covers more than the first raw API
+        # page (promoted slots shrink organic coverage on page 0 alone).
+        pages_per_poll=max(1, int(_number(olx, "pages_per_poll", 2, minimum=1))),
         search_queries=search_queries,
         database_path=db_cfg.get("path", "listings.db"),
         stats_interval_seconds=_number(
@@ -234,6 +247,9 @@ class DealMonitor:
         self._stats = Stats()
         self._blacklist_patterns = _compile_keyword_patterns(config.blacklist_keywords)
         self._accessory_patterns = _compile_keyword_patterns(config.accessory_keywords)
+        # Listing ids currently queued or being sent — prevents the pending
+        # retry scanner from double-enqueueing the same deal.
+        self._inflight_notify: Set[str] = set()
 
     def request_stop(self) -> None:
         """Signal every polling loop to finish promptly and exit."""
@@ -398,6 +414,10 @@ class DealMonitor:
 
             worker = asyncio.create_task(self._notifier_worker(notifier))
             stats_task = asyncio.create_task(self._stats_loop())
+            pending_task = asyncio.create_task(self._pending_retry_loop())
+            # Re-queue any pending Discord deliveries left from a previous run
+            # (crash / Discord outage) so they are not permanently missed.
+            await self._requeue_pending_notifications()
             loops = [
                 asyncio.create_task(
                     self._run_query_loop(query, olx_client, primed=start_primed)
@@ -421,7 +441,10 @@ class DealMonitor:
                     )
                 worker.cancel()
                 stats_task.cancel()
-                await asyncio.gather(worker, stats_task, return_exceptions=True)
+                pending_task.cancel()
+                await asyncio.gather(
+                    worker, stats_task, pending_task, return_exceptions=True
+                )
                 self._log_stats()  # final summary on shutdown
                 await self._db.close()
                 logger.info("Shutdown complete.")
@@ -482,7 +505,14 @@ class DealMonitor:
     async def _process_listings(
         self, query: str, listings: List[Listing], *, priming: bool
     ) -> None:
-        """Match, cost and enqueue new listings for a single poll result."""
+        """Match, cost and enqueue new listings for a single poll result.
+
+        Discord delivery semantics (Phase 1):
+        * Rejects / priming → ``mark_skipped`` (never notified).
+        * Deals → atomic ``try_claim_notify`` (``pending``); only the winning
+          claim is enqueued. ``sent`` is written later by the notifier worker
+          after a confirmed webhook success — never before.
+        """
         if not listings:
             logger.info(
                 "[%s] OLX returned 0 offers this poll (see OLX request/response "
@@ -521,35 +551,56 @@ class DealMonitor:
 
         self._stats.listings_checked += len(new_listings)
 
-        records = []
+        skipped_records = []
         deals: List[DealItem] = []
         for listing in new_listings:
             deal = self.evaluate(listing)
-            notified = deal is not None and not priming
-            if notified:
-                assert deal is not None
-                self._stats.deals_found += 1
-                self._stats.total_profit += deal[4]
-                # Attach the originating query for logging.
-                deals.append(deal[:5] + (query,))
-            records.append(
-                (
-                    listing.id,
-                    listing.source,
-                    listing.title,
-                    listing.price,
-                    listing.url,
-                    notified,
+            if deal is None or priming:
+                skipped_records.append(
+                    (
+                        listing.id,
+                        listing.source,
+                        listing.title,
+                        listing.price,
+                        listing.url,
+                    )
                 )
-            )
+                continue
 
-        await self._db.mark_seen_many(records)
+            listing_obj, model, storage_gb, resale, profit, _ = deal
+            claimed = await self._db.try_claim_notify(
+                listing.id,
+                source=listing.source,
+                title=listing.title,
+                price=listing.price,
+                url=listing.url,
+                model=model,
+                storage_gb=storage_gb,
+                resale_price=resale,
+                profit=profit,
+                query=query,
+            )
+            if not claimed:
+                # Another query loop already claimed this id — skip duplicate.
+                logger.info(
+                    "[%s] skip duplicate claim for id=%s (already pending/sent/"
+                    "skipped)",
+                    query,
+                    listing.id,
+                )
+                continue
+
+            self._stats.deals_found += 1
+            self._stats.total_profit += profit
+            deals.append((listing_obj, model, storage_gb, resale, profit, query))
+
+        await self._db.mark_skipped_many(skipped_records)
 
         # Deliver the newest listing first (matches the processing order
         # above), not API response order or profit size.
         deals.sort(key=lambda item: listing_sort_key(item[0]), reverse=True)
         for deal in deals:
-            await self._queue.put(deal)
+            await self._enqueue_deal(deal)
 
         logger.info(
             "[%s] %d new listing(s), %d deal(s)%s",
@@ -559,11 +610,26 @@ class DealMonitor:
             " (priming - not notified)" if priming else "",
         )
 
+    async def _enqueue_deal(self, deal: DealItem) -> None:
+        """Put ``deal`` on the notify queue unless it is already in-flight."""
+        listing_id = deal[0].id
+        if listing_id in self._inflight_notify:
+            return
+        self._inflight_notify.add(listing_id)
+        await self._queue.put(deal)
+
     async def _notifier_worker(self, notifier: DiscordNotifier) -> None:
-        """Drain the deal queue and deliver notifications, one at a time."""
+        """Drain the deal queue and deliver notifications, one at a time.
+
+        Marks ``sent`` in SQLite only after Discord confirms success. On
+        failure the row stays ``pending`` and is re-queued (inline, then via
+        the background pending scanner) — never treated as permanently done.
+        """
         while True:
             listing, model, storage_gb, resale, profit, query = await self._queue.get()
+            requeued = False
             try:
+                attempts = await self._db.bump_notify_attempt(listing.id)
                 sent = await notifier.send_deal(
                     listing,
                     resale_price=resale,
@@ -572,6 +638,7 @@ class DealMonitor:
                     storage_gb=storage_gb,
                 )
                 if sent:
+                    await self._db.mark_notified(listing.id)
                     self._stats.notifications_sent += 1
                     logger.info(
                         "DEAL [%s] %s %dGB | price=%s | resale=%.2f | profit=%.2f | %s",
@@ -583,12 +650,83 @@ class DealMonitor:
                         profit,
                         listing.url,
                     )
+                else:
+                    logger.warning(
+                        "Discord send failed for id=%s (attempt %d/%d); "
+                        "leaving status=pending for retry",
+                        listing.id,
+                        attempts,
+                        _MAX_NOTIFY_ATTEMPTS,
+                    )
+                    if attempts < _MAX_INLINE_REQUEUES:
+                        delay = min(2 ** max(attempts - 1, 0), 30)
+                        await asyncio.sleep(delay)
+                        # Keep in-flight membership; put directly on the queue.
+                        await self._queue.put(
+                            (listing, model, storage_gb, resale, profit, query)
+                        )
+                        requeued = True
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - never let one send kill worker
                 logger.warning("Notification delivery failed: %s", exc)
+                # Leave pending in DB; background scanner will retry.
             finally:
+                if not requeued:
+                    self._inflight_notify.discard(listing.id)
                 self._queue.task_done()
+
+    async def _pending_retry_loop(self) -> None:
+        """Periodically re-enqueue DB rows still stuck in ``pending``."""
+        while not self._stop_event.is_set():
+            await self._sleep_or_stop(_PENDING_RETRY_INTERVAL_SECONDS)
+            if self._stop_event.is_set():
+                break
+            try:
+                await self._requeue_pending_notifications()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001 - keep the loop alive
+                logger.warning("Pending-notify scan failed: %s", exc)
+
+    async def _requeue_pending_notifications(self) -> None:
+        """Load pending deals from SQLite and enqueue those not already in-flight."""
+        pending = await self._db.list_pending_notifications(
+            max_attempts=_MAX_NOTIFY_ATTEMPTS
+        )
+        if not pending:
+            return
+        enqueued = 0
+        for (
+            listing_id,
+            source,
+            title,
+            price,
+            url,
+            model,
+            storage_gb,
+            resale,
+            profit,
+            query,
+        ) in pending:
+            if listing_id in self._inflight_notify:
+                continue
+            listing = Listing(
+                id=listing_id,
+                title=title or "",
+                price=price,
+                currency="PLN",
+                url=url or "",
+                source=source,
+            )
+            await self._enqueue_deal(
+                (listing, model, storage_gb, resale, profit, query)
+            )
+            enqueued += 1
+        if enqueued:
+            logger.info(
+                "Re-queued %d pending Discord notification(s) for retry", enqueued
+            )
 
     async def _stats_loop(self) -> None:
         """Log rolling statistics every ``stats_interval_seconds``."""

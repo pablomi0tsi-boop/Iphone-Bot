@@ -140,4 +140,11 @@ stay at exactly 0 while `fetched N offer(s)...` lines show `N > 0` and
   600s) and once on shutdown.
 - Detection latency floor = poll interval + request (~0.4-0.5s) + OLX search
   index lag (server-side, uncontrollable). "Within seconds" is best-effort, not
-  guaranteed.
+  guaranteed. Default `pages_per_poll` is **2** (more than the first raw API
+  page). Default `max_backoff_seconds` is **60** so a failed poll cannot silence
+  a query for up to five minutes.
+- **Discord delivery:** deals are claimed as `notify_status=pending` via atomic
+  `try_claim_notify` before enqueue; marked `sent` (`mark_notified`) **only
+  after** confirmed Discord success (or dry-run). Failed sends stay `pending`
+  and are retried. Never set `notified=1` before webhook success. Concurrent
+  query loops sharing an id produce one claim only (no duplicate Discord).

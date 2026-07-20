@@ -292,13 +292,11 @@ class OlxClient:
             payload = await response.json(content_type=None)
 
         if not isinstance(payload, dict):
-            logger.warning(
-                "[%s] OLX response was not a JSON object (got %s); treating as "
-                "0 offers",
-                query,
-                type(payload).__name__,
+            # Treat as a hard poll failure so the query loop applies back-off
+            # instead of silently recording an empty page.
+            raise ValueError(
+                f"OLX response was not a JSON object (got {type(payload).__name__})"
             )
-            return [], set()
         offers = payload.get("data", []) or []
         metadata = payload.get("metadata") or {}
         promoted_raw = metadata.get("promoted") or []
