@@ -3,3 +3,10 @@
 aiohttp>=3.9,<4.0
 # Async SQLite driver used for listing de-duplication.
 aiosqlite>=0.20,<0.21
+
+# Web API (api/) — PostgreSQL + FastAPI. Does not replace the bot's SQLite store.
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+SQLAlchemy>=2.0,<3.0
+psycopg2-binary>=2.9,<3.0
+pydantic>=2.0,<3.0

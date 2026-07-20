@@ -11,19 +11,27 @@ deliberately **no minimum-profit threshold** — do not reintroduce one without
 an explicit user request; it was removed on purpose (see below).
 
 ### Environment
-- Python 3.12. Dependencies live in `requirements.txt` (`aiohttp`, `aiosqlite`).
+- Python 3.12. Dependencies live in `requirements.txt` (`aiohttp`, `aiosqlite`,
+  plus FastAPI/SQLAlchemy/psycopg2 for the web API).
 - Use the project virtualenv: `source .venv/bin/activate` before running
   anything. The update script creates `.venv` and installs deps.
 - `python3 -m venv` needs the OS package `python3.12-venv` (already handled in
   the update script). It is a system package, not a pip dependency.
 
 ### Run
-- `python main.py` (uses `config.json`) or `python main.py <path>`.
+- **Bot (unchanged):** `python main.py` (uses `config.json`) or
+  `python main.py <path>`. Still uses SQLite (`database.py` / `listings.db`)
+  for de-dup — do not replace that with Postgres yet.
 - With `discord.webhook_url` empty the app runs in **dry-run** mode: matching
   deals are logged, not POSTed. This is the safe way to run without secrets.
 - Live OLX (`https://www.olx.pl/api/v1/offers/`) is reachable from the VM and
   returns real data; a browser-like `User-Agent` is required (already set).
 - Stop with Ctrl-C — shutdown is graceful and finishes the current cycle.
+- **Web API (scaffold):** code lives under `api/` (`app.py`, `database.py`,
+  `models.py`, `schemas.py`). It is a separate FastAPI service on PostgreSQL
+  (`DATABASE_URL`, default in `api/database.py`). Start with
+  `uvicorn api.app:app --reload --host 0.0.0.0 --port 8000` from the repo root.
+  Exposes `GET /offers` and `GET /health`. Does not run or modify the bot.
 
 ### Test / verify
 - Units: `python tests/test_pricing.py` (model/storage parser + `PriceBook`).
