@@ -60,9 +60,19 @@ offer(s)...` lines appear at all), the fetch is failing before it ever reaches
 - `phonedealbot: [query] fetched N offer(s), M already seen (deduped), K new`
   (logged even when `K == 0`, so silence here — not just a 0 stat — means the
   loop for that query isn't running at all, e.g. crashed on startup).
-Per-listing rejection reasons from `DealMonitor.evaluate` are logged at DEBUG
-(`[reject] id=... -> <reason>`); raise the `phonedealbot` logger to DEBUG to
-see them (`logging.getLogger("phonedealbot").setLevel(logging.DEBUG)`).
+Every organic listing returned to `_process_listings` logs exactly one final
+INFO decision in this format (no DEBUG needed)::
+
+    LISTING <api_id> "<title>"
+      -> SENT
+    LISTING <api_id> "<title>"
+      -> SKIPPED: <reason>
+
+Reasons include `already_seen`, `accessory`, `blacklisted`, `parser_failed`,
+`model_not_recognized`, `missing_storage`, `invalid_price`, `price_not_numeric`,
+`profit_calculation_failed`, `below_profit_threshold`, and `other (…)`.
+This is logging only — filter behaviour is unchanged. Legacy `[reject] …`
+DEBUG lines still exist behind the same gates.
 `listings_checked` only increments for offers that are BOTH fetched from OLX
 AND not already in `seen_listings` — so it can legitimately stay near-flat for
 a while on a normal, working bot if nothing new has appeared yet (OLX's
