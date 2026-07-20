@@ -148,3 +148,8 @@ stay at exactly 0 while `fetched N offer(s)...` lines show `N > 0` and
   after** confirmed Discord success (or dry-run). Failed sends stay `pending`
   and are retried. Never set `notified=1` before webhook success. Concurrent
   query loops sharing an id produce one claim only (no duplicate Discord).
+- **TEMPORARY `NOTIFY-DIAG` logs** (remove after confirming/refuting HOL):
+  grep `NOTIFY-DIAG` in bot logs. Look for `hol_suspect=True`,
+  `INLINE-SLEEP` with `queue_waiting>0`, and long `total_s` / `send_s` while
+  `queue_waiting_start>0` — that is evidence the single notifier worker is
+  blocking newer deals behind one `listing_id`.

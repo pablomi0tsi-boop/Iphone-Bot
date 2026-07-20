@@ -44,6 +44,7 @@ import random
 import re
 import signal
 import sys
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Pattern, Set, Tuple
@@ -614,9 +615,23 @@ class DealMonitor:
         """Put ``deal`` on the notify queue unless it is already in-flight."""
         listing_id = deal[0].id
         if listing_id in self._inflight_notify:
+            logger.info(
+                "NOTIFY-DIAG enqueue skipped id=%s (already in-flight) | "
+                "queue_waiting=%d | inflight=%d",
+                listing_id,
+                self._queue.qsize(),
+                len(self._inflight_notify),
+            )
             return
         self._inflight_notify.add(listing_id)
         await self._queue.put(deal)
+        # TEMPORARY diagnostics (confirm head-of-line blocking before hotfix).
+        logger.info(
+            "NOTIFY-DIAG enqueued id=%s | queue_waiting=%d | inflight=%d",
+            listing_id,
+            self._queue.qsize(),
+            len(self._inflight_notify),
+        )
 
     async def _notifier_worker(self, notifier: DiscordNotifier) -> None:
         """Drain the deal queue and deliver notifications, one at a time.
@@ -628,8 +643,23 @@ class DealMonitor:
         while True:
             listing, model, storage_gb, resale, profit, query = await self._queue.get()
             requeued = False
+            # TEMPORARY diagnostics — prove/refute HOL blocking via logs.
+            waiting_when_started = self._queue.qsize()
+            t0 = time.monotonic()
+            send_s = 0.0
+            sleep_s = 0.0
             try:
                 attempts = await self._db.bump_notify_attempt(listing.id)
+                logger.info(
+                    "NOTIFY-DIAG worker START id=%s attempt=%d/%d | "
+                    "queue_waiting=%d (deals behind this one) | inflight=%d",
+                    listing.id,
+                    attempts,
+                    _MAX_NOTIFY_ATTEMPTS,
+                    waiting_when_started,
+                    len(self._inflight_notify),
+                )
+                t_send = time.monotonic()
                 sent = await notifier.send_deal(
                     listing,
                     resale_price=resale,
@@ -637,6 +667,7 @@ class DealMonitor:
                     model=model,
                     storage_gb=storage_gb,
                 )
+                send_s = time.monotonic() - t_send
                 if sent:
                     await self._db.mark_notified(listing.id)
                     self._stats.notifications_sent += 1
@@ -660,7 +691,21 @@ class DealMonitor:
                     )
                     if attempts < _MAX_INLINE_REQUEUES:
                         delay = min(2 ** max(attempts - 1, 0), 30)
+                        # HOL smoking gun: sleeping here while queue_waiting > 0
+                        # means newer deals are stalled behind this listing_id.
+                        logger.warning(
+                            "NOTIFY-DIAG worker INLINE-SLEEP id=%s delay=%.1fs | "
+                            "queue_waiting=%d (BLOCKED behind this id) | "
+                            "send_s=%.3f | inflight=%d",
+                            listing.id,
+                            delay,
+                            self._queue.qsize(),
+                            send_s,
+                            len(self._inflight_notify),
+                        )
+                        t_sleep = time.monotonic()
                         await asyncio.sleep(delay)
+                        sleep_s = time.monotonic() - t_sleep
                         # Keep in-flight membership; put directly on the queue.
                         await self._queue.put(
                             (listing, model, storage_gb, resale, profit, query)
@@ -672,6 +717,24 @@ class DealMonitor:
                 logger.warning("Notification delivery failed: %s", exc)
                 # Leave pending in DB; background scanner will retry.
             finally:
+                total_s = time.monotonic() - t0
+                waiting_after = self._queue.qsize()
+                # Flag likely head-of-line blocking for easy grepping.
+                hol_suspect = waiting_when_started > 0 and total_s >= 2.0
+                logger.info(
+                    "NOTIFY-DIAG worker END id=%s | total_s=%.3f send_s=%.3f "
+                    "sleep_s=%.3f | queue_waiting_start=%d queue_waiting_end=%d | "
+                    "inflight=%d | requeued=%s | hol_suspect=%s",
+                    listing.id,
+                    total_s,
+                    send_s,
+                    sleep_s,
+                    waiting_when_started,
+                    waiting_after,
+                    len(self._inflight_notify),
+                    requeued,
+                    hol_suspect,
+                )
                 if not requeued:
                     self._inflight_notify.discard(listing.id)
                 self._queue.task_done()
@@ -695,8 +758,15 @@ class DealMonitor:
             max_attempts=_MAX_NOTIFY_ATTEMPTS
         )
         if not pending:
+            logger.info(
+                "NOTIFY-DIAG pending-scan | db_pending_eligible=0 | "
+                "queue_waiting=%d | inflight=%d",
+                self._queue.qsize(),
+                len(self._inflight_notify),
+            )
             return
         enqueued = 0
+        skipped_inflight = 0
         for (
             listing_id,
             source,
@@ -710,6 +780,7 @@ class DealMonitor:
             query,
         ) in pending:
             if listing_id in self._inflight_notify:
+                skipped_inflight += 1
                 continue
             listing = Listing(
                 id=listing_id,
@@ -723,6 +794,15 @@ class DealMonitor:
                 (listing, model, storage_gb, resale, profit, query)
             )
             enqueued += 1
+        logger.info(
+            "NOTIFY-DIAG pending-scan | db_pending_eligible=%d | "
+            "requeued=%d | skipped_inflight=%d | queue_waiting=%d | inflight=%d",
+            len(pending),
+            enqueued,
+            skipped_inflight,
+            self._queue.qsize(),
+            len(self._inflight_notify),
+        )
         if enqueued:
             logger.info(
                 "Re-queued %d pending Discord notification(s) for retry", enqueued
