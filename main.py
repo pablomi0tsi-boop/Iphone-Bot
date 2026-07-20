@@ -258,11 +258,22 @@ class DealMonitor:
           ``"kabel w zestawie"``) -- this previously caused the monitor to
           silently drop the large majority of real, profitable listings.
         """
+        return self._keyword_skip_reason(listing) is not None
+
+    def _keyword_skip_reason(self, listing: Listing) -> Optional[str]:
+        """Return ``blacklisted`` / ``accessory`` if filtered, else ``None``.
+
+        Same checks and order as :meth:`has_filtered_keyword` (blacklist on
+        title+description first, then accessory on title only) — diagnostic
+        only, so callers can log which keyword class matched.
+        """
         full_text = listing.search_text
         if any(pattern.search(full_text) for pattern in self._blacklist_patterns):
-            return True
+            return "blacklisted"
         title_text = listing.title.lower()
-        return any(pattern.search(title_text) for pattern in self._accessory_patterns)
+        if any(pattern.search(title_text) for pattern in self._accessory_patterns):
+            return "accessory"
+        return None
 
     def evaluate(self, listing: Listing) -> Optional[DealItem]:
         """Evaluate a listing; return a :data:`DealItem` if it should notify.
@@ -285,18 +296,39 @@ class DealMonitor:
 
         Promoted ads are already excluded upstream by :class:`OlxClient`.
         """
-        if self.has_filtered_keyword(listing):
-            self._log_rejection(listing, "blacklisted/accessory keyword")
+        deal, skip_reason = self._evaluate_with_reason(listing)
+        if deal is None:
+            self._log_rejection(listing, skip_reason or "other (unknown)")
             return None
-        if listing.price is None or listing.price <= 0:
-            self._log_rejection(listing, f"no/zero price (price={listing.price!r})")
-            return None
+        return deal
+
+    def _evaluate_with_reason(
+        self, listing: Listing
+    ) -> Tuple[Optional[DealItem], Optional[str]]:
+        """Same filter outcomes as :meth:`evaluate`, plus a skip-reason code.
+
+        Returns ``(deal, None)`` when the listing should notify, or
+        ``(None, reason)`` when skipped. Reason codes (logging only)::
+
+            blacklisted | accessory | price_not_numeric | invalid_price |
+            model_not_recognized | missing_storage | profit_calculation_failed |
+            below_profit_threshold | other (<explanation>)
+
+        Filter order and outcomes are intentionally identical to the previous
+        ``evaluate`` implementation — this method exists so every API listing
+        can log exactly one final ``SENT`` / ``SKIPPED`` decision.
+        """
+        keyword_reason = self._keyword_skip_reason(listing)
+        if keyword_reason is not None:
+            return None, keyword_reason
+        if listing.price is None:
+            return None, "price_not_numeric"
+        if listing.price <= 0:
+            return None, "invalid_price"
         if listing.photo_count <= 0:
-            self._log_rejection(listing, "no photos attached")
-            return None
+            return None, "other (no photos attached)"
         if listing.is_business is True:
-            self._log_rejection(listing, "business/shop account")
-            return None
+            return None, "other (business/shop account)"
 
         spec = detect_phone(
             listing.title,
@@ -305,25 +337,45 @@ class DealMonitor:
             storage_hint=listing.storage_hint,
         )
         if not spec.is_confident:
-            self._log_rejection(
-                listing,
-                f"model/storage not confidently identified "
-                f"(model={spec.model!r}, storage_gb={spec.storage_gb!r})",
-            )
-            return None
+            if spec.model is None:
+                return None, "model_not_recognized"
+            if spec.storage_gb is None:
+                return None, "missing_storage"
+            return None, "other (model/storage not confidently identified)"
         assert spec.model is not None and spec.storage_gb is not None
 
         resale = self._config.price_book.lookup(spec.model, spec.storage_gb)
         if resale is None:
-            self._log_rejection(
-                listing,
-                f"no configured resale_prices entry for "
-                f"{spec.model!r} / {spec.storage_gb}GB",
-            )
-            return None
+            return None, "profit_calculation_failed"
 
+        # No minimum-profit filter (by design). ``below_profit_threshold`` is
+        # reserved for the LISTING decision vocabulary but is never emitted.
         profit = resale - listing.price
-        return (listing, spec.model, spec.storage_gb, resale, profit, "")
+        return (listing, spec.model, spec.storage_gb, resale, profit, ""), None
+
+    @staticmethod
+    def _log_listing_decision(
+        listing: Listing, *, outcome: str, reason: Optional[str] = None
+    ) -> None:
+        """Log exactly one final decision for an OLX API listing (INFO).
+
+        Format::
+
+            LISTING <api_id> "<title>"
+              -> SENT
+
+            LISTING <api_id> "<title>"
+              -> SKIPPED: <reason>
+        """
+        if outcome == "SENT":
+            logger.info('LISTING %s "%s"\n  -> SENT', listing.id, listing.title)
+            return
+        logger.info(
+            'LISTING %s "%s"\n  -> SKIPPED: %s',
+            listing.id,
+            listing.title,
+            reason or "other (unspecified)",
+        )
 
     @staticmethod
     def _log_rejection(listing: Listing, reason: str) -> None:
@@ -482,7 +534,11 @@ class DealMonitor:
     async def _process_listings(
         self, query: str, listings: List[Listing], *, priming: bool
     ) -> None:
-        """Match, cost and enqueue new listings for a single poll result."""
+        """Match, cost and enqueue new listings for a single poll result.
+
+        Every listing in ``listings`` (organic results from the OLX client)
+        logs exactly one final ``LISTING … -> SENT|SKIPPED`` decision.
+        """
         if not listings:
             logger.info(
                 "[%s] OLX returned 0 offers this poll (see OLX request/response "
@@ -504,6 +560,14 @@ class DealMonitor:
             len(already_seen),
             len(new_listings),
         )
+
+        # Already-seen offers still get a final decision log (no evaluate).
+        for listing in listings:
+            if listing.id in already_seen:
+                self._log_listing_decision(
+                    listing, outcome="SKIPPED", reason="already_seen"
+                )
+
         if not new_listings:
             return
 
@@ -524,10 +588,22 @@ class DealMonitor:
         records = []
         deals: List[DealItem] = []
         for listing in new_listings:
-            deal = self.evaluate(listing)
+            deal, skip_reason = self._evaluate_with_reason(listing)
             notified = deal is not None and not priming
-            if notified:
-                assert deal is not None
+            if deal is None:
+                self._log_listing_decision(
+                    listing, outcome="SKIPPED", reason=skip_reason
+                )
+                self._log_rejection(listing, skip_reason or "other (unknown)")
+            elif priming:
+                # Would notify after priming; first-cycle seed only.
+                self._log_listing_decision(
+                    listing,
+                    outcome="SKIPPED",
+                    reason="other (priming - first cycle, not notified)",
+                )
+            else:
+                self._log_listing_decision(listing, outcome="SENT")
                 self._stats.deals_found += 1
                 self._stats.total_profit += deal[4]
                 # Attach the originating query for logging.
