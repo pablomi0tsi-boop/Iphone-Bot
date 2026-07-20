@@ -44,7 +44,9 @@ import random
 import re
 import signal
 import sys
+import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Pattern, Tuple
 
@@ -58,8 +60,10 @@ from pricing import PriceBook, detect_phone
 logger = logging.getLogger("phonedealbot")
 
 # Item pushed onto the notification queue:
-#   (listing, model, storage_gb, resale_price, profit, query)
-DealItem = Tuple[Listing, str, int, float, float, str]
+#   (listing, model, storage_gb, resale_price, profit, query, fetched_at)
+# ``fetched_at`` is a Unix timestamp (seconds) recorded when the bot first
+# saw this listing in an OLX poll response (diagnostic latency logging only).
+DealItem = Tuple[Listing, str, int, float, float, str, float]
 
 # Polish letters treated as "word characters" for the keyword-boundary check
 # below (spelled out explicitly so the intent is unambiguous regardless of
@@ -264,8 +268,10 @@ class DealMonitor:
         title_text = listing.title.lower()
         return any(pattern.search(title_text) for pattern in self._accessory_patterns)
 
-    def evaluate(self, listing: Listing) -> Optional[DealItem]:
-        """Evaluate a listing; return a :data:`DealItem` if it should notify.
+    def evaluate(
+        self, listing: Listing
+    ) -> Optional[Tuple[Listing, str, int, float, float, str]]:
+        """Evaluate a listing; return match fields if it should notify.
 
         There is **no minimum-profit threshold** -- every new, correctly
         identified iPhone listing notifies, whether it would be profitable or
@@ -436,15 +442,24 @@ class DealMonitor:
         local_primed = primed
 
         while not self._stop_event.is_set():
+            cycle_t0 = time.monotonic()
+            fetch_s = 0.0
+            process_s = 0.0
             try:
+                t_fetch = time.monotonic()
                 listings = await olx_client.search(
                     query,
                     limit=self._config.results_per_query,
                     pages=self._config.pages_per_poll,
                 )
+                fetch_s = time.monotonic() - t_fetch
+
+                t_process = time.monotonic()
                 await self._process_listings(
                     query, listings, priming=not local_primed
                 )
+                process_s = time.monotonic() - t_process
+
                 if not local_primed:
                     local_primed = True
                     logger.info(
@@ -477,7 +492,29 @@ class DealMonitor:
             delay = (backoff if backoff else base) + random.uniform(
                 0, self._config.jitter_seconds
             )
+            t_sleep = time.monotonic()
             await self._sleep_or_stop(delay)
+            sleep_s = time.monotonic() - t_sleep
+            cycle_s = time.monotonic() - cycle_t0
+
+            steps = {
+                "olx_fetch": fetch_s,
+                "process_listings": process_s,
+                "poll_sleep": sleep_s,
+            }
+            slowest_name = max(steps, key=lambda name: steps[name])
+            logger.info(
+                "[%s] LATENCY poll-cycle: total=%.3fs | olx_fetch=%.3fs | "
+                "process_listings=%.3fs | poll_sleep=%.3fs | "
+                "slowest_step=%s (%.3fs)",
+                query,
+                cycle_s,
+                fetch_s,
+                process_s,
+                sleep_s,
+                slowest_name,
+                steps[slowest_name],
+            )
 
     async def _process_listings(
         self, query: str, listings: List[Listing], *, priming: bool
@@ -521,6 +558,10 @@ class DealMonitor:
 
         self._stats.listings_checked += len(new_listings)
 
+        # Wall-clock moment this poll first observed these listings (after OLX
+        # fetch returned). Used only for end-to-end latency diagnostics.
+        fetched_at = time.time()
+
         records = []
         deals: List[DealItem] = []
         for listing in new_listings:
@@ -530,8 +571,8 @@ class DealMonitor:
                 assert deal is not None
                 self._stats.deals_found += 1
                 self._stats.total_profit += deal[4]
-                # Attach the originating query for logging.
-                deals.append(deal[:5] + (query,))
+                # Attach the originating query + fetch timestamp for logging.
+                deals.append(deal[:5] + (query, fetched_at))
             records.append(
                 (
                     listing.id,
@@ -562,7 +603,15 @@ class DealMonitor:
     async def _notifier_worker(self, notifier: DiscordNotifier) -> None:
         """Drain the deal queue and deliver notifications, one at a time."""
         while True:
-            listing, model, storage_gb, resale, profit, query = await self._queue.get()
+            (
+                listing,
+                model,
+                storage_gb,
+                resale,
+                profit,
+                query,
+                fetched_at,
+            ) = await self._queue.get()
             try:
                 sent = await notifier.send_deal(
                     listing,
@@ -573,6 +622,7 @@ class DealMonitor:
                 )
                 if sent:
                     self._stats.notifications_sent += 1
+                    sent_at = time.time()
                     logger.info(
                         "DEAL [%s] %s %dGB | price=%s | resale=%.2f | profit=%.2f | %s",
                         query,
@@ -583,12 +633,71 @@ class DealMonitor:
                         profit,
                         listing.url,
                     )
+                    self._log_notification_latency(
+                        listing, query=query, fetched_at=fetched_at, sent_at=sent_at
+                    )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - never let one send kill worker
                 logger.warning("Notification delivery failed: %s", exc)
             finally:
                 self._queue.task_done()
+
+    @staticmethod
+    def _log_notification_latency(
+        listing: Listing, *, query: str, fetched_at: float, sent_at: float
+    ) -> None:
+        """Log end-to-end latency for a single Discord-notified listing.
+
+        Fields (diagnostic only, no behaviour change):
+        * ``olx_created_time`` — listing publication timestamp from OLX
+        * ``fetched_at`` — when this bot first observed the listing in a poll
+        * ``sent_at`` — when the Discord webhook send completed successfully
+        * ``total_latency_s`` — ``sent_at - olx_created_time`` (publication → Discord)
+        * ``bot_latency_s`` — ``sent_at - fetched_at`` (first fetch → Discord)
+        """
+        fetched_iso = datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat()
+        sent_iso = datetime.fromtimestamp(sent_at, tz=timezone.utc).isoformat()
+        bot_latency_s = sent_at - fetched_at
+
+        created_raw = listing.created_at
+        total_latency_s: Optional[float] = None
+        if created_raw:
+            try:
+                created_dt = datetime.fromisoformat(created_raw)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                total_latency_s = sent_at - created_dt.timestamp()
+            except ValueError:
+                total_latency_s = None
+
+        if total_latency_s is not None:
+            logger.info(
+                "LATENCY notify [%s] id=%s | olx_created_time=%s | "
+                "fetched_at=%s | sent_at=%s | total_latency_s=%.3f | "
+                "bot_latency_s=%.3f | url=%s",
+                query,
+                listing.id,
+                created_raw,
+                fetched_iso,
+                sent_iso,
+                total_latency_s,
+                bot_latency_s,
+                listing.url,
+            )
+        else:
+            logger.info(
+                "LATENCY notify [%s] id=%s | olx_created_time=%s | "
+                "fetched_at=%s | sent_at=%s | total_latency_s=n/a | "
+                "bot_latency_s=%.3f | url=%s",
+                query,
+                listing.id,
+                created_raw,
+                fetched_iso,
+                sent_iso,
+                bot_latency_s,
+                listing.url,
+            )
 
     async def _stats_loop(self) -> None:
         """Log rolling statistics every ``stats_interval_seconds``."""
