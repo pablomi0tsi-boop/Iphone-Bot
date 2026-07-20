@@ -32,8 +32,10 @@ A listing is **ignored** when any of these hold:
 
 Otherwise a Discord notification is sent for **every** such listing, showing
 `profit_or_loss = resale_price − listing_price` as `💰 Zysk/Strata: +X zł` (profit)
-or `-X zł` (loss) — **there is no minimum-profit threshold**. Deals are
-delivered **most-profitable first** (a loss can still rank last).
+or `-X zł` (loss) — **there is no minimum-profit threshold**. Listings are
+processed and delivered to Discord **newest-first**, ordered by OLX's own
+`created_time` publication timestamp (falling back to `last_refresh_time`),
+never by raw API response order or profit size — see the ordering note below.
 
 > **Keyword matching notes** (fixed root cause of missed notifications):
 > - `accessory_keywords` are matched against the **title only**, not the
@@ -87,11 +89,19 @@ polling is the only option. This client uses OLX's internal JSON API
 (`/api/v1/offers/`) — an unofficial endpoint that can change or throttle without
 notice. Verified limitations that shape latency:
 
-- **No reliable "newest first" order.** The API honours price sorting
-  (`filter_float_price:asc|desc`) but **silently ignores `created_at` sorting**
-  (both directions return identical, non-chronological results). Detection
-  therefore relies on de-duplicating every organic result against SQLite, not on
-  ordering.
+- **No reliable server-side "newest first" order.** The API honours price
+  sorting (`filter_float_price:asc|desc`) but **silently ignores `created_at`
+  sorting** (both directions return identical, non-chronological results). New-
+  listing *detection* relies on de-duplicating every organic result against
+  SQLite, not on API order — but `OlxClient.search()` re-sorts every fetched
+  page **client-side** by each listing's OLX `created_time` publication
+  timestamp (`Listing.created_at`, falling back to `last_refresh_time` when
+  absent) before returning, via `listing_sort_key()`. This guarantees the
+  monitor always processes and delivers the newest listing first within a
+  poll, independent of the raw API ordering. Look for
+  `"sorted N listing(s) newest-first by 'created_at'"` and
+  `"processing order (newest-first, by 'created_at')"` in the logs to verify
+  this at runtime.
 - **Search-index lag is server-side and uncontrollable.** A brand-new listing
   only becomes detectable once OLX surfaces it in the search API; this can add
   seconds to a few minutes that no client can remove.

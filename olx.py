@@ -20,8 +20,13 @@ against the live API):
 * **``sort_by=created_at`` is NOT honoured.** The endpoint accepts
   ``sort_by=filter_float_price:asc|desc`` (verified working) but silently ignores
   ``created_at`` ordering and can even surface very old listings first. Because
-  there is no reliable "newest first" ordering, detection relies on de-duplicating
-  every organic result against the local database rather than trusting order.
+  there is no reliable server-side "newest first" ordering, this client
+  re-sorts every page of results **client-side** by publication timestamp
+  (see :func:`listing_sort_key`) before returning, so callers always process
+  the newest listing first regardless of API response order. New-listing
+  *detection* still relies on de-duplicating every organic result against the
+  local database (not on order) -- sorting only affects *processing order*
+  within a single poll.
 
 This client therefore raises on transport/HTTP errors so the caller can apply
 back-off; only per-offer parsing errors are swallowed.
@@ -32,6 +37,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 import aiohttp
@@ -42,7 +48,38 @@ _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["Listing", "OlxClient"]
+__all__ = ["Listing", "OlxClient", "listing_sort_key"]
+
+# Sentinel for listings with a missing/unparseable timestamp: treat them as
+# the OLDEST possible listing so they sort to the end, never mistaken for the
+# newest (which would happen with, say, ``datetime.max`` or ``None``).
+_UNKNOWN_TIMESTAMP = datetime.min.replace(tzinfo=timezone.utc)
+
+
+def listing_sort_key(listing: "Listing") -> datetime:
+    """Parse :attr:`Listing.created_at` into a timezone-aware ``datetime`` for
+    newest-first sorting.
+
+    ``created_at`` is populated (see :meth:`OlxClient._parse_offer`) from
+    OLX's own ``created_time`` field (the listing's true publication
+    timestamp), falling back to ``last_refresh_time`` only when
+    ``created_time`` is absent. Both are ISO-8601 strings, e.g.
+    ``"2026-07-19T10:00:00+02:00"``.
+
+    Returns :data:`_UNKNOWN_TIMESTAMP` (the oldest possible value) when the
+    field is missing or fails to parse, so such listings are never mistaken
+    for the newest one.
+    """
+    value = listing.created_at
+    if not value:
+        return _UNKNOWN_TIMESTAMP
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return _UNKNOWN_TIMESTAMP
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed
 
 
 @dataclass(slots=True)
@@ -130,12 +167,18 @@ class OlxClient:
     async def search(
         self, query: str, *, limit: int = 40, pages: int = 1
     ) -> List[Listing]:
-        """Search OLX for ``query`` and return de-duplicated organic listings.
+        """Search OLX for ``query`` and return de-duplicated organic listings,
+        **sorted newest-first** by publication timestamp.
 
         Fetches ``pages`` sequential pages of ``limit`` organic results each,
-        dropping promoted ads. Because the API provides no reliable chronological
-        order, the caller is expected to de-duplicate returned ids against
-        persistent storage to discover which listings are new.
+        dropping promoted ads. The API's own response order is NOT
+        chronological (``sort_by=created_at`` is ignored server-side -- see
+        the module docstring), so this method re-sorts the collected listings
+        client-side using :func:`listing_sort_key` (``Listing.created_at``,
+        i.e. OLX's ``created_time``/``last_refresh_time``) before returning,
+        so callers always process/notify the newest listing first regardless
+        of the raw API ordering. The caller is still expected to de-duplicate
+        returned ids against persistent storage to discover which are new.
 
         Raises on transport/HTTP errors (so the caller can back off); individual
         malformed offers are skipped.
@@ -195,6 +238,26 @@ class OlxClient:
             parse_errors,
             len(collected),
         )
+
+        # OLX's response order is not chronological, so impose our own
+        # newest-first order using each listing's publication timestamp
+        # rather than relying on API response order.
+        collected.sort(key=listing_sort_key, reverse=True)
+        if collected:
+            newest, oldest = collected[0], collected[-1]
+            logger.info(
+                "[%s] sorted %d listing(s) newest-first by 'created_at' "
+                "(OLX 'created_time', falling back to 'last_refresh_time') "
+                "-- first=%s id=%s title=%r | last=%s id=%s title=%r",
+                query,
+                len(collected),
+                newest.created_at,
+                newest.id,
+                newest.title,
+                oldest.created_at,
+                oldest.id,
+                oldest.title,
+            )
         return collected
 
     async def _fetch_page(

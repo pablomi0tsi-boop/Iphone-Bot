@@ -52,7 +52,7 @@ import aiohttp
 
 from database import ListingDatabase
 from discord import DiscordNotifier
-from olx import Listing, OlxClient
+from olx import Listing, OlxClient, listing_sort_key
 from pricing import PriceBook, detect_phone
 
 logger = logging.getLogger("phonedealbot")
@@ -493,6 +493,9 @@ class DealMonitor:
 
         ids = [listing.id for listing in listings]
         already_seen = await self._db.seen_subset(ids)
+        # ``listings`` is already sorted newest-first by OlxClient.search()
+        # (via listing_sort_key / Listing.created_at); a plain filter here
+        # preserves that order, so new_listings[0] is the newest new listing.
         new_listings = [listing for listing in listings if listing.id not in already_seen]
         logger.info(
             "[%s] fetched %d offer(s), %d already seen (deduped), %d new",
@@ -503,6 +506,18 @@ class DealMonitor:
         )
         if not new_listings:
             return
+
+        logger.info(
+            "[%s] processing order (newest-first, by 'created_at'): "
+            "first (newest)=%s id=%s title=%r | last (oldest)=%s id=%s title=%r",
+            query,
+            new_listings[0].created_at,
+            new_listings[0].id,
+            new_listings[0].title,
+            new_listings[-1].created_at,
+            new_listings[-1].id,
+            new_listings[-1].title,
+        )
 
         self._stats.listings_checked += len(new_listings)
 
@@ -530,8 +545,9 @@ class DealMonitor:
 
         await self._db.mark_seen_many(records)
 
-        # Deliver the most profitable deals first for lowest time-to-alert.
-        deals.sort(key=lambda item: item[4], reverse=True)
+        # Deliver the newest listing first (matches the processing order
+        # above), not API response order or profit size.
+        deals.sort(key=lambda item: listing_sort_key(item[0]), reverse=True)
         for deal in deals:
             await self._queue.put(deal)
 

@@ -84,9 +84,18 @@ stay at exactly 0 while `fetched N offer(s)...` lines show `N > 0` and
   push API exists) and needs a browser-like `User-Agent`.
 - **`sort_by=created_at:*` is silently ignored** by the API (asc and desc return
   identical, non-chronological results, sometimes oldest-first). Only
-  `filter_float_price:asc|desc` actually sorts. So there is NO reliable
-  newest-first order — detection MUST rely on DB de-dup, not ordering. Do not
-  reintroduce a `created_at` sort assumption.
+  `filter_float_price:asc|desc` actually sorts server-side. New-listing
+  *detection* MUST still rely on DB de-dup, not on API order. Do not
+  reintroduce a `sort_by=created_at` request-param assumption — it's a no-op.
+  **Processing/delivery order is handled client-side instead**:
+  `OlxClient.search()` sorts every fetched page by `listing_sort_key()`
+  (`Listing.created_at`, i.e. OLX `created_time` → `last_refresh_time`
+  fallback) before returning, and `DealMonitor._process_listings` /
+  the deal-delivery sort in `main.py` both preserve/re-apply that same
+  newest-first order — so the monitor always processes and notifies the
+  newest listing in a poll first, regardless of raw API ordering. Verify at
+  runtime via the `"sorted N listing(s) newest-first by 'created_at'"` (olx)
+  and `"processing order (newest-first, by 'created_at')"` (main) log lines.
 - Each page injects paid **promoted ads**; their indices are in
   `metadata.promoted`. `olx.py` drops them by default (`include_promoted:false`).
 - OLX phone listings expose structured attributes `phonemodel` and
