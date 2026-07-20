@@ -95,7 +95,15 @@ class Listing:
     price: Optional[float]
     currency: str
     url: str
+    # Preferred timestamp for newest-first ordering / monitoring: OLX
+    # ``created_time``, falling back to ``last_refresh_time`` when absent.
     created_at: Optional[str] = None
+    # Raw OLX timestamps (ISO-8601). Kept separately so latency logging can
+    # measure "became visible in search" via ``last_refresh_time`` while
+    # still reporting original ``created_time`` for reference. Not used by
+    # filters / sorting / de-duplication.
+    created_time: Optional[str] = None
+    last_refresh_time: Optional[str] = None
     location: Optional[str] = None
     image_url: Optional[str] = None
     description: str = ""
@@ -328,13 +336,19 @@ class OlxClient:
         business = offer.get("business")
         user = offer.get("user")
         seller_name = user.get("name") if isinstance(user, dict) else None
+        created_time = offer.get("created_time")
+        last_refresh_time = offer.get("last_refresh_time")
         return Listing(
             id=str(offer_id),
             title=(offer.get("title") or "").strip(),
             price=price,
             currency=currency,
             url=offer.get("url") or "",
-            created_at=offer.get("created_time") or offer.get("last_refresh_time"),
+            created_at=created_time or last_refresh_time,
+            created_time=created_time if isinstance(created_time, str) else None,
+            last_refresh_time=(
+                last_refresh_time if isinstance(last_refresh_time, str) else None
+            ),
             location=self._extract_location(offer.get("location")),
             image_url=self._extract_image(photos),
             description=self._clean_description(offer.get("description")),

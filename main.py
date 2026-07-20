@@ -644,54 +644,89 @@ class DealMonitor:
                 self._queue.task_done()
 
     @staticmethod
+    def _parse_olx_timestamp(raw: Optional[str]) -> Optional[float]:
+        """Parse an OLX ISO-8601 timestamp into a Unix epoch seconds value."""
+        if not raw:
+            return None
+        try:
+            dt = datetime.fromisoformat(raw)
+        except ValueError:
+            return None
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.timestamp()
+
+    @staticmethod
     def _log_notification_latency(
         listing: Listing, *, query: str, fetched_at: float, sent_at: float
     ) -> None:
-        """Log end-to-end latency for a single Discord-notified listing.
+        """Log detection latency for a single Discord-notified listing.
 
-        Fields (diagnostic only, no behaviour change):
-        * ``olx_created_time`` — listing publication timestamp from OLX
+        Diagnostic only — no behaviour change.
+
+        Primary metric ``detection_latency_s`` is the time from when the
+        listing became visible in OLX search results to when the Discord
+        notification was sent::
+
+            detection_latency_s = sent_at - last_refresh_time
+            # falls back to created_time only when last_refresh_time is missing
+
+        ``olx_created_time`` is still logged for reference (original publish
+        time; often much older than the search-visible bump).
+
+        Also logged:
         * ``fetched_at`` — when this bot first observed the listing in a poll
         * ``sent_at`` — when the Discord webhook send completed successfully
-        * ``total_latency_s`` — ``sent_at - olx_created_time`` (publication → Discord)
         * ``bot_latency_s`` — ``sent_at - fetched_at`` (first fetch → Discord)
         """
         fetched_iso = datetime.fromtimestamp(fetched_at, tz=timezone.utc).isoformat()
         sent_iso = datetime.fromtimestamp(sent_at, tz=timezone.utc).isoformat()
         bot_latency_s = sent_at - fetched_at
 
-        created_raw = listing.created_at
-        total_latency_s: Optional[float] = None
-        if created_raw:
-            try:
-                created_dt = datetime.fromisoformat(created_raw)
-                if created_dt.tzinfo is None:
-                    created_dt = created_dt.replace(tzinfo=timezone.utc)
-                total_latency_s = sent_at - created_dt.timestamp()
-            except ValueError:
-                total_latency_s = None
+        created_raw = listing.created_time
+        refresh_raw = listing.last_refresh_time
+        # Visible-in-search clock: last_refresh_time (OLX "Odświeżono"/bump),
+        # falling back to created_time only when refresh is absent.
+        visible_raw = refresh_raw or created_raw
+        visible_source = (
+            "last_refresh_time"
+            if refresh_raw
+            else ("created_time" if created_raw else "missing")
+        )
+        visible_ts = DealMonitor._parse_olx_timestamp(visible_raw)
+        detection_latency_s: Optional[float] = (
+            sent_at - visible_ts if visible_ts is not None else None
+        )
 
-        if total_latency_s is not None:
+        if detection_latency_s is not None:
             logger.info(
-                "LATENCY notify [%s] id=%s | olx_created_time=%s | "
-                "fetched_at=%s | sent_at=%s | total_latency_s=%.3f | "
-                "bot_latency_s=%.3f | url=%s",
+                "LATENCY notify [%s] id=%s | "
+                "detection_latency_s=%.3f "
+                "(visible_in_olx_search→discord_sent; source=%s) | "
+                "olx_last_refresh_time=%s | olx_created_time=%s | "
+                "fetched_at=%s | sent_at=%s | bot_latency_s=%.3f | url=%s",
                 query,
                 listing.id,
+                detection_latency_s,
+                visible_source,
+                refresh_raw,
                 created_raw,
                 fetched_iso,
                 sent_iso,
-                total_latency_s,
                 bot_latency_s,
                 listing.url,
             )
         else:
             logger.info(
-                "LATENCY notify [%s] id=%s | olx_created_time=%s | "
-                "fetched_at=%s | sent_at=%s | total_latency_s=n/a | "
-                "bot_latency_s=%.3f | url=%s",
+                "LATENCY notify [%s] id=%s | "
+                "detection_latency_s=n/a "
+                "(visible_in_olx_search→discord_sent; source=%s) | "
+                "olx_last_refresh_time=%s | olx_created_time=%s | "
+                "fetched_at=%s | sent_at=%s | bot_latency_s=%.3f | url=%s",
                 query,
                 listing.id,
+                visible_source,
+                refresh_raw,
                 created_raw,
                 fetched_iso,
                 sent_iso,

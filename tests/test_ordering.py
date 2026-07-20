@@ -56,6 +56,70 @@ def test_listing_sort_key_parses_and_orders() -> None:
           "missing/malformed timestamps sort as oldest")
 
 
+def test_detection_latency_uses_last_refresh_time() -> None:
+    """Primary detection latency is sent_at - last_refresh_time.
+
+    Falls back to created_time only when last_refresh_time is missing.
+    Sorting still uses created_at (= created_time or last_refresh_time).
+    """
+    # _parse_offer does not touch the session; pass a placeholder.
+    client = OlxClient.__new__(OlxClient)
+
+    both = client._parse_offer(
+        {
+            "id": 10,
+            "title": "bumped",
+            "url": "https://www.olx.pl/oferta/10",
+            "created_time": "2026-01-01T10:00:00+02:00",
+            "last_refresh_time": "2026-07-20T12:00:00+02:00",
+            "description": "",
+            "params": [{"key": "price", "value": {"value": 500, "currency": "PLN"}}],
+            "business": False,
+            "photos": [{"link": "https://example.com/pic.jpg"}],
+        }
+    )
+    assert both is not None
+    assert both.created_time == "2026-01-01T10:00:00+02:00"
+    assert both.last_refresh_time == "2026-07-20T12:00:00+02:00"
+    # Monitoring/sorting clock unchanged: prefer original created_time.
+    assert both.created_at == both.created_time
+
+    sent_at = DealMonitor._parse_olx_timestamp("2026-07-20T12:00:05+02:00")
+    assert sent_at is not None
+    refresh_ts = DealMonitor._parse_olx_timestamp(both.last_refresh_time)
+    created_ts = DealMonitor._parse_olx_timestamp(both.created_time)
+    assert refresh_ts is not None and created_ts is not None
+    detection = sent_at - refresh_ts
+    assert abs(detection - 5.0) < 0.01, detection
+    # Using created_time instead would be ~months — metric must NOT do that.
+    assert (sent_at - created_ts) > 1_000_000
+
+    no_refresh = client._parse_offer(
+        {
+            "id": 11,
+            "title": "fresh",
+            "url": "https://www.olx.pl/oferta/11",
+            "created_time": "2026-07-20T12:00:00+02:00",
+            "description": "",
+            "params": [{"key": "price", "value": {"value": 500, "currency": "PLN"}}],
+            "business": False,
+            "photos": [{"link": "https://example.com/pic.jpg"}],
+        }
+    )
+    assert no_refresh is not None
+    assert no_refresh.last_refresh_time is None
+    assert no_refresh.created_time == "2026-07-20T12:00:00+02:00"
+    visible = no_refresh.last_refresh_time or no_refresh.created_time
+    visible_ts = DealMonitor._parse_olx_timestamp(visible)
+    assert visible_ts is not None
+    assert abs((sent_at - visible_ts) - 5.0) < 0.01
+
+    print(
+        "PASS: detection latency prefers last_refresh_time "
+        "(falls back to created_time); sorting created_at unchanged"
+    )
+
+
 def _offer(offer_id: int, title: str, created_time: str | None) -> dict:
     return {
         "id": offer_id,
@@ -206,6 +270,7 @@ async def test_deal_delivery_order_is_newest_first_not_profit_order() -> None:
 
 async def _main() -> None:
     test_listing_sort_key_parses_and_orders()
+    test_detection_latency_uses_last_refresh_time()
     await test_olx_client_search_returns_newest_first()
     await test_deal_delivery_order_is_newest_first_not_profit_order()
     print("\nALL ORDERING TESTS PASSED")
