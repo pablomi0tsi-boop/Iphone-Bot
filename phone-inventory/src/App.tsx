@@ -62,7 +62,13 @@ function AppShell() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Phone Inventory</p>
-          <h1>Magazyn</h1>
+          <h1>
+            {tab === 'magazyn'
+              ? 'Magazyn'
+              : tab === 'finanse'
+                ? 'Finanse'
+                : 'Historia'}
+          </h1>
         </div>
         <div className="header-stats">
           <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
