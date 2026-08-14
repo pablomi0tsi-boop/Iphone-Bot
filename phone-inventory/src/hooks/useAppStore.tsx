@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -45,11 +46,19 @@ const AppStoreContext = createContext<AppStoreValue | null>(null);
 
 export function AppStoreProvider({
   children,
-  repository = createDefaultRepository(),
+  repository,
 }: {
   children: ReactNode;
   repository?: InventoryRepository;
 }) {
+  // Stabilize repository identity — default-arg `createDefaultRepository()` would
+  // allocate a new instance every render and re-trigger the load effect forever.
+  const repositoryRef = useRef<InventoryRepository | null>(null);
+  if (repositoryRef.current === null) {
+    repositoryRef.current = repository ?? createDefaultRepository();
+  }
+  const repo = repositoryRef.current;
+
   const [state, setState] = useState<AppState>(() => createInitialState());
   const [ready, setReady] = useState(false);
   const [search, setSearch] = useState('');
@@ -59,7 +68,7 @@ export function AppStoreProvider({
     let cancelled = false;
     (async () => {
       try {
-        const loaded = await repository.load();
+        const loaded = await repo.load();
         if (!cancelled) {
           setState(loaded ?? createInitialState());
           setReady(true);
@@ -74,12 +83,12 @@ export function AppStoreProvider({
     return () => {
       cancelled = true;
     };
-  }, [repository]);
+  }, [repo]);
 
   useEffect(() => {
     if (!ready) return;
-    void repository.save(state);
-  }, [ready, repository, state]);
+    void repo.save(state);
+  }, [ready, repo, state]);
 
   const run = useCallback((fn: (current: AppState) => AppState) => {
     setError(null);
