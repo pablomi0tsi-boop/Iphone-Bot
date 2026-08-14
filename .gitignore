@@ -13,6 +13,12 @@ listings.db*
 demo_*.json
 demo_*.db*
 
+# Node / phone-inventory app
+phone-inventory/node_modules/
+phone-inventory/dist/
+phone-inventory/dist-ssr/
+*.local
+
 # Local editor/OS
 .DS_Store
 .idea/
