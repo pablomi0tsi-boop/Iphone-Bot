@@ -21,7 +21,8 @@ Aplikacja: http://localhost:5173
 ## Testy
 
 ```bash
-npm test
+npm test          # logika domenowa
+npm run test:e2e  # pełny flow UI (Playwright, viewport iPhone)
 npm run build
 ```
 
