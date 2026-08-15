@@ -51,6 +51,11 @@ function migratePhone(
   const createdAt =
     typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
 
+  const status: Phone['status'] =
+    raw.status === 'sold' || raw.status === 'removed' || raw.status === 'in_stock'
+      ? raw.status
+      : 'in_stock';
+
   return {
     id: raw.id,
     modelId: raw.modelId,
@@ -62,6 +67,7 @@ function migratePhone(
     note: typeof raw.note === 'string' ? raw.note : undefined,
     purchasePrice,
     listedValue,
+    status,
     createdAt,
     updatedAt:
       typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt,
@@ -207,6 +213,7 @@ export class RemoteInventoryRepository implements InventoryRepository {
   }
 }
 
-export function createDefaultRepository(): InventoryRepository {
+/** @deprecated Prefer `createDefaultRepository` from `./index` (Supabase-aware). */
+export function createLocalRepository(): InventoryRepository {
   return new LocalStorageRepository();
 }

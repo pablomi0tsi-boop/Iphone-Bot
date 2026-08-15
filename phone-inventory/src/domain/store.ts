@@ -57,6 +57,7 @@ export function addPhone(state: AppState, input: AddPhoneInput): AppState {
     note: input.note?.trim() || undefined,
     purchasePrice: input.purchasePrice,
     listedValue: input.listedValue,
+    status: 'in_stock' as const,
     createdAt,
     updatedAt: createdAt,
   };
@@ -84,7 +85,9 @@ export function updatePhone(state: AppState, input: UpdatePhoneInput): AppState 
   assertMoney(input.listedValue, 'Cena sprzedaży / wartość');
   assertBattery(input.batteryPercent);
 
-  const index = state.phones.findIndex((item) => item.id === input.phoneId);
+  const index = state.phones.findIndex(
+    (item) => item.id === input.phoneId && item.status === 'in_stock',
+  );
   if (index < 0) throw new Error('Nie znaleziono telefonu.');
 
   const existing = state.phones[index];
@@ -126,13 +129,19 @@ export function updatePhone(state: AppState, input: UpdatePhoneInput): AppState 
 }
 
 export function removePhone(state: AppState, phoneId: string): AppState {
-  const phone = state.phones.find((item) => item.id === phoneId);
+  const phone = state.phones.find(
+    (item) => item.id === phoneId && item.status === 'in_stock',
+  );
   if (!phone) throw new Error('Nie znaleziono telefonu.');
   const model = state.models.find((item) => item.id === phone.modelId);
 
   const next: AppState = {
     ...state,
-    phones: state.phones.filter((item) => item.id !== phoneId),
+    phones: state.phones.map((item) =>
+      item.id === phoneId
+        ? { ...item, status: 'removed' as const, updatedAt: nowIso() }
+        : item,
+    ).filter((item) => item.status === 'in_stock'),
   };
 
   return pushHistory(next, {
@@ -154,13 +163,16 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
   const buyerName = input.buyerName.trim();
   if (!buyerName) throw new Error('Imię i nazwisko kupującego jest wymagane.');
 
-  const phone = state.phones.find((item) => item.id === input.phoneId);
+  const phone = state.phones.find(
+    (item) => item.id === input.phoneId && item.status === 'in_stock',
+  );
   if (!phone) throw new Error('Nie znaleziono telefonu w magazynie.');
 
   const model = state.models.find((item) => item.id === phone.modelId);
   const modelName = model?.name ?? 'Nieznany model';
   const profit = calcProfit(input.salePrice, phone.purchasePrice);
   const soldAt = dateInputToIso(input.soldAt.trim());
+  const depositTo = input.depositTo ?? 'cash';
 
   const sale: SaleRecord = {
     id: createId(),
@@ -173,17 +185,19 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     purchasePrice: phone.purchasePrice,
     salePrice: input.salePrice,
     profit,
+    depositTo,
     soldAt,
   };
 
+  const finance = { ...state.finance };
+  finance[depositTo] = finance[depositTo] + input.salePrice;
+
+  // Soft-sell: phone leaves the in-stock list but remains in DB as sold.
   const next: AppState = {
     ...state,
     phones: state.phones.filter((item) => item.id !== phone.id),
     sales: [sale, ...state.sales],
-    finance: {
-      ...state.finance,
-      cash: state.finance.cash + input.salePrice,
-    },
+    finance,
   };
 
   return pushHistory(next, {

@@ -148,6 +148,7 @@ describe('store flows', () => {
     expect(migrated?.models.some((m) => m.name === 'iPhone 13 Mini')).toBe(true);
     expect(migrated?.phones[0].condition).toBe('idealny');
     expect(migrated?.phones[0].listedValue).toBe(700);
+    expect(migrated?.phones[0].status).toBe('in_stock');
     expect(migrated?.models.some((m) => m.name === 'iPhone 16 Pro')).toBe(true);
   });
 });

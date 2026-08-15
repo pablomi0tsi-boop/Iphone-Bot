@@ -32,7 +32,11 @@ export function sumStockValue(phones: Phone[]): number {
 
 export function getPhonesForModel(state: AppState, modelId: string): Phone[] {
   return state.phones
-    .filter((phone) => phone.modelId === modelId)
+    .filter(
+      (phone) =>
+        phone.modelId === modelId &&
+        (phone.status === undefined || phone.status === 'in_stock'),
+    )
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
@@ -63,9 +67,12 @@ export function getWarehouseTotals(state: AppState): {
   phoneCount: number;
   stockValue: number;
 } {
+  const inStock = state.phones.filter(
+    (phone) => phone.status === undefined || phone.status === 'in_stock',
+  );
   return {
-    phoneCount: state.phones.length,
-    stockValue: sumStockValue(state.phones),
+    phoneCount: inStock.length,
+    stockValue: sumStockValue(inStock),
   };
 }
 
@@ -74,7 +81,7 @@ export function getTotalProfit(state: AppState): number {
 }
 
 export function getFinanceSummary(state: AppState): FinanceSummary {
-  const phoneValue = sumStockValue(state.phones);
+  const { stockValue: phoneValue } = getWarehouseTotals(state);
   const totalProfit = getTotalProfit(state);
   return {
     cash: state.finance.cash,

@@ -19,6 +19,8 @@ export interface Model {
   createdAt: string;
 }
 
+export type PhoneStatus = 'in_stock' | 'sold' | 'removed';
+
 export interface Phone {
   id: string;
   modelId: string;
@@ -30,6 +32,7 @@ export interface Phone {
   purchasePrice: number;
   /** Asking / stock value (cena sprzedaży / wartość). */
   listedValue: number;
+  status: PhoneStatus;
   createdAt: string;
   updatedAt: string;
 }
@@ -46,6 +49,8 @@ export interface SaleRecord {
   purchasePrice: number;
   salePrice: number;
   profit: number;
+  /** Where proceeds went. */
+  depositTo?: 'cash' | 'bank';
   soldAt: string;
 }
 
@@ -131,4 +136,5 @@ export interface SellPhoneInput {
   salePrice: number;
   soldAt: string;
   buyerName: string;
+  depositTo?: 'cash' | 'bank';
 }

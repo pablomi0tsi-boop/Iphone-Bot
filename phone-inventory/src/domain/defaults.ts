@@ -1,4 +1,4 @@
-import { CATALOG_MODELS, normalizeModelName } from './catalog';
+import { CATALOG_MODELS, modelIdFromName, normalizeModelName } from './catalog';
 import type { AppState, Model } from './types';
 
 export const STORAGE_KEY = 'phone-inventory:v1';
@@ -12,13 +12,13 @@ export function createId(): string {
 
 export function createInitialModels(now = new Date().toISOString()): Model[] {
   return CATALOG_MODELS.map((name) => ({
-    id: createId(),
+    id: modelIdFromName(name),
     name,
     createdAt: now,
   }));
 }
 
-/** Ensure catalog models exist; keep existing ids when names match. */
+/** Ensure catalog models exist with stable ids; keep existing when names match. */
 export function ensureCatalogModels(
   models: Model[],
   now = new Date().toISOString(),
@@ -27,7 +27,11 @@ export function ensureCatalogModels(
   for (const model of models) {
     const name = normalizeModelName(model.name);
     if (!byName.has(name.toLowerCase())) {
-      byName.set(name.toLowerCase(), { ...model, name });
+      byName.set(name.toLowerCase(), {
+        ...model,
+        id: modelIdFromName(name),
+        name,
+      });
     }
   }
 
@@ -35,14 +39,21 @@ export function ensureCatalogModels(
   for (const catalogName of CATALOG_MODELS) {
     const existing = byName.get(catalogName.toLowerCase());
     if (existing) {
-      next.push({ ...existing, name: catalogName });
+      next.push({
+        ...existing,
+        id: modelIdFromName(catalogName),
+        name: catalogName,
+      });
       byName.delete(catalogName.toLowerCase());
     } else {
-      next.push({ id: createId(), name: catalogName, createdAt: now });
+      next.push({
+        id: modelIdFromName(catalogName),
+        name: catalogName,
+        createdAt: now,
+      });
     }
   }
 
-  // Keep any custom models that aren't in the catalog.
   for (const leftover of byName.values()) {
     next.push(leftover);
   }

@@ -72,6 +72,14 @@ export function normalizeModelName(name: string): string {
   return match ?? trimmed;
 }
 
+/** Stable cross-device model id (e.g. "iphone-15-pro"). */
+export function modelIdFromName(name: string): string {
+  return normalizeModelName(name)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
 export function storagesForModel(modelName: string): string[] {
   const book = PRICE_BOOK[normalizeModelName(modelName)];
   return book ? Object.keys(book) : [];

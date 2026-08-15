@@ -39,6 +39,7 @@ interface AppStoreValue {
   sellPhone: (input: SellPhoneInput) => void;
   setCash: (cash: number) => void;
   setBank: (bank: number) => void;
+  refresh: () => void;
   error: string | null;
   clearError: () => void;
 }
@@ -62,45 +63,76 @@ export function AppStoreProvider({
   const [ready, setReady] = useState(false);
   const [search, setSearch] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const persistGeneration = useRef(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const loaded = await repo.load();
-        if (!cancelled) {
-          setState(loaded ?? createInitialState());
-          setReady(true);
-        }
-      } catch {
-        if (!cancelled) {
-          setState(createInitialState());
-          setReady(true);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
+  const loadFromRepo = useCallback(async () => {
+    try {
+      const loaded = await repo.load();
+      setState(loaded ?? createInitialState());
+      setError(null);
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Nie udało się wczytać danych.';
+      setError(message);
+      setState(createInitialState());
+    } finally {
+      setReady(true);
+    }
   }, [repo]);
 
   useEffect(() => {
-    if (!ready) return;
-    void repo.save(state);
-  }, [ready, repo, state]);
+    void loadFromRepo();
+  }, [loadFromRepo]);
 
-  const run = useCallback((fn: (current: AppState) => AppState) => {
-    setError(null);
-    setState((current) => {
-      try {
-        return fn(current);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Nieznany błąd';
-        setError(message);
-        return current;
+  // Pull latest cloud data when returning to the tab (computer ↔ phone sync).
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        void loadFromRepo();
       }
-    });
-  }, []);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => document.removeEventListener('visibilitychange', onVisible);
+  }, [loadFromRepo]);
+
+  const run = useCallback(
+    (fn: (current: AppState) => AppState) => {
+      setError(null);
+      setState((current) => {
+        let next = current;
+        try {
+          next = fn(current);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Nieznany błąd';
+          setError(message);
+          return current;
+        }
+
+        const generation = ++persistGeneration.current;
+        void (async () => {
+          try {
+            await repo.save(next);
+            if (generation !== persistGeneration.current) return;
+            // Reload from source of truth so peer devices stay consistent after refresh.
+            const fresh = await repo.load();
+            if (generation !== persistGeneration.current) return;
+            if (fresh) setState(fresh);
+          } catch (err) {
+            const message =
+              err instanceof Error
+                ? err.message
+                : 'Nie udało się zapisać danych.';
+            setError(message);
+            // Roll back optimistic state on persistence failure.
+            void loadFromRepo();
+          }
+        })();
+
+        return next;
+      });
+    },
+    [repo, loadFromRepo],
+  );
 
   const summaries = useMemo(() => getModelStockSummaries(state), [state]);
   const filteredSummaries = useMemo(
@@ -125,6 +157,9 @@ export function AppStoreProvider({
     sellPhone: (input) => run((s) => ops.sellPhone(s, input)),
     setCash: (cash) => run((s) => ops.setCash(s, cash)),
     setBank: (bank) => run((s) => ops.setBank(s, bank)),
+    refresh: () => {
+      void loadFromRepo();
+    },
     error,
     clearError: () => setError(null),
   };
