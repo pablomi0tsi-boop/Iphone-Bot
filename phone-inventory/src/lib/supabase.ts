@@ -272,7 +272,8 @@ export async function signInWithGitHub(): Promise<void> {
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo: window.location.origin,
+      // Return to warehouse after OAuth; storefront stays public at `/`.
+      redirectTo: `${window.location.origin}/magazyn`,
     },
   });
   if (error) {

@@ -4,7 +4,7 @@ import path from 'node:path';
 const ARTIFACTS = '/opt/cursor/artifacts';
 
 test('warehouse with restored finance UI', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/magazyn');
   await page.evaluate(() => localStorage.clear());
   await page.reload();
 

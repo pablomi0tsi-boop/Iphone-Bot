@@ -3,10 +3,10 @@ import { expect, test } from '@playwright/test';
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 test('visual warehouse walkthrough', async ({ page }) => {
-  await page.goto('/');
+  await page.goto('/magazyn');
   await page.evaluate(() => localStorage.clear());
   await page.reload();
-  await expect(page.getByRole('heading', { name: '📱 Magazyn' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Magazyn' })).toBeVisible();
   await pause(600);
 
   await page.getByRole('button', { name: 'DODAJ TELEFON' }).click();
