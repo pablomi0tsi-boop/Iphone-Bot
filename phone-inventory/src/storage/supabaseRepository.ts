@@ -8,7 +8,11 @@ import type {
   PhoneStatus,
   SaleRecord,
 } from '../domain/types';
-import { createSupabaseClient, type Database } from '../lib/supabase';
+import {
+  createSupabaseClient,
+  ensureSupabaseAuth,
+  type Database,
+} from '../lib/supabase';
 import { LocalStorageRepository } from './localStorageRepository';
 import type { InventoryRepository } from './types';
 
@@ -156,6 +160,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
 
   private async loadRemote(): Promise<AppState> {
     const supabase = this.client();
+    await ensureSupabaseAuth(supabase);
 
     const [phonesRes, salesRes, financeRes, historyRes] = await Promise.all([
       supabase
@@ -205,6 +210,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
 
   async save(state: AppState): Promise<void> {
     const supabase = this.client();
+    await ensureSupabaseAuth(supabase);
     const remote = await this.loadRemote();
 
     const modelNameById = new Map(state.models.map((m) => [m.id, m.name]));
@@ -285,6 +291,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
 
   async clear(): Promise<void> {
     const supabase = this.client();
+    await ensureSupabaseAuth(supabase);
     const ops = await Promise.all([
       supabase.from('sales').delete().neq('id', '00000000-0000-0000-0000-000000000000'),
       supabase.from('history').delete().neq('id', '00000000-0000-0000-0000-000000000000'),

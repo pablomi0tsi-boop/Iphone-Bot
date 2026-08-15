@@ -25,11 +25,13 @@ Aplikacja: http://localhost:5173
 
 1. W projekcie Supabase otwórz **SQL Editor** i wklej zawartość:
    `supabase/migrations/20260815120000_phone_inventory.sql`
-2. W ustawieniach projektu skopiuj Project URL oraz anon/publishable key.
-3. Ustaw w `.env` (lokalnie) oraz w Vercel → Environment Variables:
+   (tworzy `phones`, `sales`, `finance`, `history` + RLS tylko dla `authenticated`).
+2. Włącz **Authentication → Providers → Anonymous Sign-Ins** (aplikacja loguje się cicho, bez UI).
+3. Skopiuj Project URL oraz anon/publishable key.
+4. Ustaw w `.env` (lokalnie) oraz w Vercel → Environment Variables:
    - `VITE_SUPABASE_URL`
    - `VITE_SUPABASE_PUBLISHABLE_KEY`
-4. Po buildzie oba urządzenia korzystają z tej samej bazy — odśwież stronę, żeby zobaczyć zmiany z drugiego urządzenia.
+5. Po buildzie oba urządzenia korzystają z tej samej bazy — odśwież stronę, żeby zobaczyć zmiany z drugiego urządzenia.
 
 Bez tych zmiennych aplikacja działa na `localStorage` (dane tylko na jednym urządzeniu).
 

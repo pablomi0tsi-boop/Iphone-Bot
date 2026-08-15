@@ -210,6 +210,7 @@ export function isSupabaseConfigured(): boolean {
 }
 
 let client: SupabaseClient<Database> | null = null;
+let authReady: Promise<void> | null = null;
 
 export function createSupabaseClient(): SupabaseClient<Database> {
   if (client) return client;
@@ -222,13 +223,46 @@ export function createSupabaseClient(): SupabaseClient<Database> {
     );
   }
 
+  // Persist session so RLS (authenticated-only) keeps working across reloads.
   client = createClient<Database>(url, key, {
     auth: {
-      persistSession: false,
-      autoRefreshToken: false,
+      persistSession: true,
+      autoRefreshToken: true,
+      detectSessionInUrl: false,
     },
   });
   return client;
+}
+
+/**
+ * RLS allows only the `authenticated` role. Without a login UI we use
+ * Supabase Anonymous Sign-In (enable it in Auth → Providers).
+ * Shared inventory: policies grant all authenticated users access to all rows.
+ */
+export async function ensureSupabaseAuth(
+  supabase: SupabaseClient<Database> = createSupabaseClient(),
+): Promise<void> {
+  if (!authReady) {
+    authReady = (async () => {
+      const { data: existing, error: sessionError } =
+        await supabase.auth.getSession();
+      if (sessionError) {
+        throw new Error(`Supabase auth session: ${sessionError.message}`);
+      }
+      if (existing.session) return;
+
+      const { error } = await supabase.auth.signInAnonymously();
+      if (error) {
+        throw new Error(
+          `Supabase auth: ${error.message}. Włącz Anonymous Sign-Ins w Supabase → Authentication → Providers.`,
+        );
+      }
+    })().catch((err) => {
+      authReady = null;
+      throw err;
+    });
+  }
+  await authReady;
 }
 
 /** Alias used by the repository layer. */
