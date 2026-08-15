@@ -151,6 +151,8 @@ export function removePhone(state: AppState, phoneId: string): AppState {
 export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
   assertMoney(input.salePrice, 'Cena sprzedaży');
   if (!input.soldAt?.trim()) throw new Error('Data sprzedaży jest wymagana.');
+  const buyerName = input.buyerName.trim();
+  if (!buyerName) throw new Error('Imię i nazwisko kupującego jest wymagane.');
 
   const phone = state.phones.find((item) => item.id === input.phoneId);
   if (!phone) throw new Error('Nie znaleziono telefonu w magazynie.');
@@ -167,6 +169,7 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     modelName,
     storage: phone.storage,
     imei: phone.imei,
+    buyerName,
     purchasePrice: phone.purchasePrice,
     salePrice: input.salePrice,
     profit,
@@ -188,6 +191,7 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     profit,
     storage: phone.storage,
     imei: phone.imei,
+    buyerName,
     phoneId: phone.id,
   });
 }

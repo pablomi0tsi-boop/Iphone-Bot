@@ -45,6 +45,9 @@ test('simple warehouse flow on mobile viewport', async ({ page }) => {
   await page.locator('.unit-card').click();
   await expect(page.getByRole('dialog', { name: 'Telefon' })).toBeVisible();
   await page.getByRole('button', { name: 'Sprzedaj' }).click();
+  await page
+    .locator('#sell-unit-form input[type="text"]')
+    .fill('Jan Kowalski');
   await page.locator('#sell-unit-form input[type="number"]').fill('2500');
   await page.getByRole('button', { name: 'Potwierdź sprzedaż' }).click();
 
@@ -53,6 +56,7 @@ test('simple warehouse flow on mobile viewport', async ({ page }) => {
   await page.getByRole('navigation').getByRole('button', { name: 'Zysk' }).click();
   await expect(page.locator('.monthly-stat-value').first()).toContainText('1 szt.');
   await expect(page.locator('.monthly-stats')).toContainText('500');
+  await expect(page.locator('.sale-list')).toContainText('Jan Kowalski');
 
   await page.screenshot({
     path: path.join(ARTIFACTS, 'e2e_monthly_profit.png'),

@@ -110,10 +110,12 @@ describe('store flows', () => {
       phoneId,
       salePrice: 2500,
       soldAt: '2026-08-14',
+      buyerName: 'Jan Kowalski',
     });
 
     expect(state.phones).toHaveLength(1);
     expect(state.sales).toHaveLength(1);
+    expect(state.sales[0].buyerName).toBe('Jan Kowalski');
     const august = getMonthlyProfit(state, '2026-08');
     expect(august.soldCount).toBe(1);
     expect(august.totalProfit).toBe(500);

@@ -72,6 +72,7 @@ export function MonthlyProfitPanel({
               <div className="sale-meta">
                 {sale.storage ? <span>{sale.storage}</span> : null}
                 {sale.imei ? <span>IMEI {sale.imei}</span> : null}
+                {sale.buyerName ? <span>Kupujący: {sale.buyerName}</span> : null}
               </div>
               <div className="sale-money">
                 <span>{formatPln(sale.salePrice)}</span>

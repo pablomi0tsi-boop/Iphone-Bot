@@ -42,6 +42,7 @@ export interface SaleRecord {
   modelName: string;
   storage?: string;
   imei?: string;
+  buyerName?: string;
   purchasePrice: number;
   salePrice: number;
   profit: number;
@@ -60,6 +61,7 @@ export interface HistoryEntry {
   profit?: number;
   storage?: string;
   imei?: string;
+  buyerName?: string;
   note?: string;
   phoneId?: string;
 }
@@ -114,4 +116,5 @@ export interface SellPhoneInput {
   phoneId: string;
   salePrice: number;
   soldAt: string;
+  buyerName: string;
 }

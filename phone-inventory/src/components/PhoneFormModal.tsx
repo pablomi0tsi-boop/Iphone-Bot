@@ -31,7 +31,7 @@ interface PhoneFormModalProps {
   phone?: Phone | null;
   onClose: () => void;
   onSubmit: (data: PhoneFormFields) => void;
-  onSell?: (data: { salePrice: number; soldAt: string }) => void;
+  onSell?: (data: { salePrice: number; soldAt: string; buyerName: string }) => void;
   onDelete?: () => void;
 }
 
@@ -57,6 +57,7 @@ export function PhoneFormModal({
   const [sellOpen, setSellOpen] = useState(false);
   const [salePrice, setSalePrice] = useState('');
   const [soldAt, setSoldAt] = useState('');
+  const [buyerName, setBuyerName] = useState('');
 
   const selectedModel = models.find((item) => item.id === modelId);
   const storages = useMemo(
@@ -79,6 +80,7 @@ export function PhoneFormModal({
       setListedValue(String(phone.listedValue));
       setSalePrice(String(phone.listedValue));
       setSoldAt(isoToDateInput(new Date().toISOString()));
+      setBuyerName('');
       return;
     }
 
@@ -143,8 +145,9 @@ export function PhoneFormModal({
   const handleSell = (event: FormEvent) => {
     event.preventDefault();
     const price = Number(salePrice.replace(',', '.'));
-    if (!onSell || !Number.isFinite(price) || !soldAt) return;
-    onSell({ salePrice: price, soldAt });
+    const buyer = buyerName.trim();
+    if (!onSell || !Number.isFinite(price) || !soldAt || !buyer) return;
+    onSell({ salePrice: price, soldAt, buyerName: buyer });
     onClose();
   };
 
@@ -168,6 +171,17 @@ export function PhoneFormModal({
       {sellOpen ? (
         <form id="sell-unit-form" className="form" onSubmit={handleSell}>
           <label>
+            Imię i nazwisko kupującego
+            <input
+              type="text"
+              value={buyerName}
+              onChange={(e) => setBuyerName(e.target.value)}
+              placeholder="Jan Kowalski"
+              required
+              autoFocus
+            />
+          </label>
+          <label>
             Cena sprzedaży (zł)
             <input
               type="number"
@@ -177,7 +191,6 @@ export function PhoneFormModal({
               value={salePrice}
               onChange={(e) => setSalePrice(e.target.value)}
               required
-              autoFocus
             />
           </label>
           <label>
