@@ -14,6 +14,7 @@ import {
   shiftYearMonth,
   sumStockValue,
 } from './domain/calculations';
+import { useAuth } from './hooks/useAuth';
 import { useAppStore } from './hooks/useAppStore';
 import './App.css';
 
@@ -51,6 +52,7 @@ function AppShell() {
     error,
     clearError,
   } = useAppStore();
+  const { cloudAuthRequired, user, signOut } = useAuth();
 
   const [tab, setTab] = useState<TabId>('magazyn');
   const [view, setView] = useState<MagazynView>({ kind: 'home' });
@@ -103,6 +105,23 @@ function AppShell() {
         <div className="header-stats">
           <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
           <small>wartość telefonów</small>
+          {cloudAuthRequired ? (
+            <small>
+              {user?.user_metadata?.user_name ||
+                user?.email ||
+                'GitHub'}{' '}
+              ·{' '}
+              <button
+                type="button"
+                className="linkish"
+                onClick={() => {
+                  void signOut();
+                }}
+              >
+                Wyloguj
+              </button>
+            </small>
+          ) : null}
         </div>
       </header>
 

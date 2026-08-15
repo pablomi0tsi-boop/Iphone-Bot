@@ -122,13 +122,12 @@ create index if not exists history_phone_id_idx on public.history (phone_id);
 -- Privileges + Row Level Security
 --
 -- Sensitive data: IMEI, buyer_name, purchase/sale prices.
--- - anon (bare publishable key, no JWT session): NO table access
--- - authenticated (signed-in session, incl. Anonymous Sign-In): full CRUD
--- - service_role (dashboard / server): bypasses RLS
+-- - anon (bare publishable/anon key, no JWT session): NO table access
+-- - authenticated (GitHub OAuth via Supabase Auth): full CRUD
+-- - service_role (dashboard / server only — never in the Vite app): bypasses RLS
 --
--- App requirement: enable Authentication → Providers → Anonymous Sign-Ins
--- (client signs in silently; no UI login). All authenticated devices share
--- the same inventory rows (shared household store).
+-- Frontend uses VITE_SUPABASE_ANON_KEY + signInWithOAuth({ provider: 'github' }).
+-- Shared inventory: all signed-in users see the same rows.
 -- =============================================================================
 
 revoke all on table public.phones from public;

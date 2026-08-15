@@ -1,4 +1,4 @@
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createClient, type Session, type SupabaseClient, type User } from '@supabase/supabase-js';
 
 export type Json =
   | string
@@ -203,69 +203,132 @@ export type Database = {
   };
 };
 
-export function isSupabaseConfigured(): boolean {
+/** Prefer VITE_SUPABASE_ANON_KEY; keep PUBLISHABLE_KEY as alias for older deploys. */
+export function getSupabaseAnonKey(): string | undefined {
+  const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
+  const publishable = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const key = (typeof anon === 'string' && anon.trim() ? anon : publishable) as
+    | string
+    | undefined;
+  return key?.trim() || undefined;
+}
+
+export function getSupabaseUrl(): string | undefined {
   const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  return Boolean(url && key && !String(url).includes('YOUR_PROJECT'));
+  return typeof url === 'string' && url.trim() ? url.trim() : undefined;
+}
+
+export function isSupabaseConfigured(): boolean {
+  const url = getSupabaseUrl();
+  const key = getSupabaseAnonKey();
+  return Boolean(url && key && !url.includes('YOUR_PROJECT'));
+}
+
+/** Where Supabase should send the user after GitHub OAuth completes. */
+export function getOAuthRedirectTo(): string {
+  if (typeof window === 'undefined') return '';
+  // Root of the SPA — Vercel rewrites all paths to index.html.
+  return `${window.location.origin}/`;
 }
 
 let client: SupabaseClient<Database> | null = null;
-let authReady: Promise<void> | null = null;
 
 export function createSupabaseClient(): SupabaseClient<Database> {
   if (client) return client;
 
-  const url = import.meta.env.VITE_SUPABASE_URL;
-  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+  const url = getSupabaseUrl();
+  const key = getSupabaseAnonKey();
   if (!url || !key) {
     throw new Error(
-      'Brak VITE_SUPABASE_URL / VITE_SUPABASE_PUBLISHABLE_KEY. Skopiuj .env.example → .env.',
+      'Brak VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Skopiuj .env.example → .env.',
     );
   }
 
-  // Persist session so RLS (authenticated-only) keeps working across reloads.
   client = createClient<Database>(url, key, {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      detectSessionInUrl: false,
+      // Required to exchange ?code= from OAuth redirect into a session.
+      detectSessionInUrl: true,
+      flowType: 'pkce',
     },
   });
   return client;
 }
 
+export function getSupabaseClient(): SupabaseClient<Database> {
+  return createSupabaseClient();
+}
+
 /**
- * RLS allows only the `authenticated` role. Without a login UI we use
- * Supabase Anonymous Sign-In (enable it in Auth → Providers).
- * Shared inventory: policies grant all authenticated users access to all rows.
+ * Ensure there is a logged-in Supabase session (GitHub OAuth).
+ * Does not use anonymous auth or service_role.
  */
 export async function ensureSupabaseAuth(
   supabase: SupabaseClient<Database> = createSupabaseClient(),
-): Promise<void> {
-  if (!authReady) {
-    authReady = (async () => {
-      const { data: existing, error: sessionError } =
-        await supabase.auth.getSession();
-      if (sessionError) {
-        throw new Error(`Supabase auth session: ${sessionError.message}`);
-      }
-      if (existing.session) return;
-
-      const { error } = await supabase.auth.signInAnonymously();
-      if (error) {
-        throw new Error(
-          `Supabase auth: ${error.message}. Włącz Anonymous Sign-Ins w Supabase → Authentication → Providers.`,
-        );
-      }
-    })().catch((err) => {
-      authReady = null;
-      throw err;
-    });
+): Promise<Session> {
+  const { data, error } = await supabase.auth.getSession();
+  if (error) {
+    throw new Error(`Supabase auth session: ${error.message}`);
   }
-  await authReady;
+  if (!data.session) {
+    throw new Error('Brak sesji. Zaloguj się przez GitHub.');
+  }
+  return data.session;
 }
 
-/** Alias used by the repository layer. */
-export function getSupabaseClient(): SupabaseClient<Database> {
-  return createSupabaseClient();
+export async function signInWithGitHub(): Promise<void> {
+  const supabase = createSupabaseClient();
+  const redirectTo = getOAuthRedirectTo();
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: 'github',
+    options: {
+      redirectTo,
+      skipBrowserRedirect: false,
+    },
+  });
+  if (error) {
+    throw new Error(`GitHub OAuth: ${error.message}`);
+  }
+}
+
+export async function signOut(): Promise<void> {
+  const supabase = createSupabaseClient();
+  const { error } = await supabase.auth.signOut();
+  if (error) {
+    throw new Error(`Wylogowanie: ${error.message}`);
+  }
+}
+
+export async function getCurrentUser(): Promise<User | null> {
+  const { data, error } = await createSupabaseClient().auth.getUser();
+  if (error) return null;
+  return data.user;
+}
+
+/** Strip OAuth query/hash params from the URL after session is established. */
+export function clearOAuthUrlParams(): void {
+  if (typeof window === 'undefined') return;
+  const url = new URL(window.location.href);
+  const sensitive = [
+    'code',
+    'state',
+    'error',
+    'error_description',
+    'error_code',
+  ];
+  let changed = false;
+  for (const key of sensitive) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  }
+  if (url.hash && /access_token|refresh_token|error/.test(url.hash)) {
+    url.hash = '';
+    changed = true;
+  }
+  if (changed) {
+    window.history.replaceState({}, document.title, url.pathname + url.search);
+  }
 }
