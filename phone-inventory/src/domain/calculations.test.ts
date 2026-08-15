@@ -138,11 +138,13 @@ describe('store flows', () => {
         },
       ],
       sales: [],
-      finance: { cash: 0, bank: 0 },
+      finance: { cash: 100, bank: 200 },
       history: [],
     });
 
     expect(migrated?.version).toBe(3);
+    expect(migrated?.finance.cash).toBe(100);
+    expect(migrated?.finance.bank).toBe(200);
     expect(migrated?.models.some((m) => m.name === 'iPhone 13 Mini')).toBe(true);
     expect(migrated?.phones[0].condition).toBe('idealny');
     expect(migrated?.phones[0].listedValue).toBe(700);

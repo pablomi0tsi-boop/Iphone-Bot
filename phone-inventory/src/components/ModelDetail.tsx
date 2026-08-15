@@ -28,15 +28,15 @@ export function ModelDetail({
         ← Magazyn
       </button>
 
-      <header className="page-header">
-        <h1>{model.name}</h1>
+      <div className="model-detail-header">
+        <h2>{model.name}</h2>
         <p className="page-subtitle">
           {phones.length} szt. · Łączna wartość: {formatPln(stockValue)}
         </p>
-      </header>
+      </div>
 
       <button type="button" className="btn primary block" onClick={onAddPhone}>
-        Dodaj {model.name}
+        + Dodaj {model.name}
       </button>
 
       {phones.length === 0 ? (

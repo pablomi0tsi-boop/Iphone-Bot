@@ -11,6 +11,7 @@ import {
 import { createInitialState } from '../domain/defaults';
 import {
   filterModelSummaries,
+  getFinanceSummary,
   getModelStockSummaries,
   getWarehouseTotals,
 } from '../domain/calculations';
@@ -31,10 +32,13 @@ interface AppStoreValue {
   summaries: ReturnType<typeof getModelStockSummaries>;
   filteredSummaries: ReturnType<typeof getModelStockSummaries>;
   totals: ReturnType<typeof getWarehouseTotals>;
+  finance: ReturnType<typeof getFinanceSummary>;
   addPhone: (input: AddPhoneInput) => void;
   updatePhone: (input: UpdatePhoneInput) => void;
   removePhone: (phoneId: string) => void;
   sellPhone: (input: SellPhoneInput) => void;
+  setCash: (cash: number) => void;
+  setBank: (bank: number) => void;
   error: string | null;
   clearError: () => void;
 }
@@ -104,6 +108,7 @@ export function AppStoreProvider({
     [summaries, search],
   );
   const totals = useMemo(() => getWarehouseTotals(state), [state]);
+  const finance = useMemo(() => getFinanceSummary(state), [state]);
 
   const value: AppStoreValue = {
     ready,
@@ -113,10 +118,13 @@ export function AppStoreProvider({
     summaries,
     filteredSummaries,
     totals,
+    finance,
     addPhone: (input) => run((s) => ops.addPhone(s, input)),
     updatePhone: (input) => run((s) => ops.updatePhone(s, input)),
     removePhone: (phoneId) => run((s) => ops.removePhone(s, phoneId)),
     sellPhone: (input) => run((s) => ops.sellPhone(s, input)),
+    setCash: (cash) => run((s) => ops.setCash(s, cash)),
+    setBank: (bank) => run((s) => ops.setBank(s, bank)),
     error,
     clearError: () => setError(null),
   };

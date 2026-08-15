@@ -1,5 +1,8 @@
 import { useMemo, useState } from 'react';
 import { BottomNav, type TabId } from './components/BottomNav';
+import { EditFinanceModal } from './components/EditFinanceModal';
+import { FinancePanel } from './components/FinancePanel';
+import { HistoryList } from './components/HistoryList';
 import { MagazynHome } from './components/MagazynHome';
 import { ModelDetail } from './components/ModelDetail';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
@@ -18,6 +21,19 @@ type MagazynView =
   | { kind: 'home' }
   | { kind: 'model'; modelId: string };
 
+function tabTitle(tab: TabId): string {
+  switch (tab) {
+    case 'magazyn':
+      return 'Magazyn';
+    case 'zysk':
+      return 'Zysk';
+    case 'finanse':
+      return 'Finanse';
+    case 'historia':
+      return 'Historia';
+  }
+}
+
 function AppShell() {
   const {
     ready,
@@ -25,11 +41,13 @@ function AppShell() {
     search,
     setSearch,
     filteredSummaries,
-    totals,
+    finance,
     addPhone,
     updatePhone,
     removePhone,
     sellPhone,
+    setCash,
+    setBank,
     error,
     clearError,
   } = useAppStore();
@@ -40,6 +58,8 @@ function AppShell() {
   const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [presetModelId, setPresetModelId] = useState<string | null>(null);
   const [editPhoneId, setEditPhoneId] = useState<string | null>(null);
+  const [editCashOpen, setEditCashOpen] = useState(false);
+  const [editBankOpen, setEditBankOpen] = useState(false);
   const [profitMonth, setProfitMonth] = useState(() => currentYearMonth());
 
   const sortedModels = useMemo(
@@ -75,6 +95,17 @@ function AppShell() {
 
   return (
     <div className="app-shell">
+      <header className="app-header">
+        <div>
+          <p className="eyebrow">Phone Inventory</p>
+          <h1>{tabTitle(tab)}</h1>
+        </div>
+        <div className="header-stats">
+          <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
+          <small>wartość telefonów</small>
+        </div>
+      </header>
+
       {error ? (
         <div className="toast error" role="alert">
           <span>{error}</span>
@@ -87,8 +118,9 @@ function AppShell() {
       <main className="app-main">
         {tab === 'magazyn' && view.kind === 'home' ? (
           <MagazynHome
-            phoneCount={totals.phoneCount}
-            stockValue={totals.stockValue}
+            finance={finance}
+            onEditCash={() => setEditCashOpen(true)}
+            onEditBank={() => setEditBankOpen(true)}
             search={search}
             onSearch={setSearch}
             summaries={filteredSummaries}
@@ -131,6 +163,18 @@ function AppShell() {
             onPrev={() => setProfitMonth(shiftYearMonth(profitMonth, -1))}
             onNext={() => setProfitMonth(shiftYearMonth(profitMonth, 1))}
           />
+        ) : null}
+
+        {tab === 'finanse' ? (
+          <FinancePanel
+            finance={finance}
+            onEditCash={() => setEditCashOpen(true)}
+            onEditBank={() => setEditBankOpen(true)}
+          />
+        ) : null}
+
+        {tab === 'historia' ? (
+          <HistoryList entries={state.history} />
         ) : null}
       </main>
 
@@ -181,6 +225,24 @@ function AppShell() {
               }
             : undefined
         }
+      />
+
+      <EditFinanceModal
+        open={editCashOpen}
+        title="Gotówka"
+        label="Stan gotówki (zł)"
+        value={finance.cash}
+        onClose={() => setEditCashOpen(false)}
+        onSubmit={setCash}
+      />
+
+      <EditFinanceModal
+        open={editBankOpen}
+        title="Stan konta"
+        label="Stan konta (zł)"
+        value={finance.bank}
+        onClose={() => setEditBankOpen(false)}
+        onSubmit={setBank}
       />
     </div>
   );

@@ -1,10 +1,11 @@
-import { formatPln } from '../domain/calculations';
-import type { ModelStockSummary } from '../domain/types';
+import type { FinanceSummary, ModelStockSummary } from '../domain/types';
+import { FinancePanel } from './FinancePanel';
 import { SearchBar } from './SearchBar';
 
 interface MagazynHomeProps {
-  phoneCount: number;
-  stockValue: number;
+  finance: FinanceSummary;
+  onEditCash: () => void;
+  onEditBank: () => void;
   search: string;
   onSearch: (value: string) => void;
   summaries: ModelStockSummary[];
@@ -13,8 +14,9 @@ interface MagazynHomeProps {
 }
 
 export function MagazynHome({
-  phoneCount,
-  stockValue,
+  finance,
+  onEditCash,
+  onEditBank,
   search,
   onSearch,
   summaries,
@@ -22,27 +24,21 @@ export function MagazynHome({
   onAddPhone,
 }: MagazynHomeProps) {
   return (
-    <div className="view-stack">
-      <header className="page-header">
-        <h1>📱 Magazyn</h1>
-      </header>
+    <>
+      <FinancePanel
+        finance={finance}
+        compact
+        onEditCash={onEditCash}
+        onEditBank={onEditBank}
+      />
 
-      <section className="summary-strip">
-        <div>
-          <span className="meta-label">Liczba telefonów</span>
-          <strong>{phoneCount} szt.</strong>
-        </div>
-        <div>
-          <span className="meta-label">Wartość magazynu</span>
-          <strong>{formatPln(stockValue)}</strong>
-        </div>
-      </section>
+      <SearchBar value={search} onChange={onSearch} placeholder="Szukaj modelu..." />
 
-      <button type="button" className="btn primary block lg" onClick={onAddPhone}>
-        DODAJ TELEFON
-      </button>
-
-      <SearchBar value={search} onChange={onSearch} />
+      <div className="action-row">
+        <button type="button" className="btn primary" onClick={onAddPhone}>
+          + Dodaj telefon
+        </button>
+      </div>
 
       <ul className="model-rows">
         {summaries.map((item) => (
@@ -62,6 +58,6 @@ export function MagazynHome({
       {summaries.length === 0 ? (
         <p className="empty-hint">Brak modeli pasujących do wyszukiwania.</p>
       ) : null}
-    </div>
+    </>
   );
 }

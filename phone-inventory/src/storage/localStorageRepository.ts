@@ -121,11 +121,18 @@ export function normalizeAppState(value: unknown): AppState | null {
     ? (value.sales as SaleRecord[])
     : migrateSalesFromHistory(history);
 
+  const financeRaw = isObject(value.finance) ? value.finance : {};
+  const finance = {
+    cash: typeof financeRaw.cash === 'number' ? financeRaw.cash : 0,
+    bank: typeof financeRaw.bank === 'number' ? financeRaw.bank : 0,
+  };
+
   return {
     version: 3,
     models,
     phones,
     sales,
+    finance,
     history,
   };
 }

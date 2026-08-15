@@ -49,7 +49,7 @@ export interface SaleRecord {
   soldAt: string;
 }
 
-export type HistoryType = 'purchase' | 'sale' | 'remove' | 'update';
+export type HistoryType = 'purchase' | 'sale' | 'remove' | 'update' | 'finance';
 
 export interface HistoryEntry {
   id: string;
@@ -66,11 +66,17 @@ export interface HistoryEntry {
   phoneId?: string;
 }
 
+export interface Finance {
+  cash: number;
+  bank: number;
+}
+
 export interface AppState {
   version: 3;
   models: Model[];
   phones: Phone[];
   sales: SaleRecord[];
+  finance: Finance;
   history: HistoryEntry[];
 }
 
@@ -79,6 +85,14 @@ export interface ModelStockSummary {
   quantity: number;
   stockValue: number;
   phones: Phone[];
+}
+
+export interface FinanceSummary {
+  cash: number;
+  bank: number;
+  phoneValue: number;
+  totalAssets: number;
+  totalProfit: number;
 }
 
 export interface MonthlyProfitSummary {

@@ -55,6 +55,7 @@ export function createInitialState(now = new Date().toISOString()): AppState {
     models: createInitialModels(now),
     phones: [],
     sales: [],
+    finance: { cash: 0, bank: 0 },
     history: [],
   };
 }

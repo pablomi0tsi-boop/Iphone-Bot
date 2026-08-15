@@ -180,6 +180,10 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     ...state,
     phones: state.phones.filter((item) => item.id !== phone.id),
     sales: [sale, ...state.sales],
+    finance: {
+      ...state.finance,
+      cash: state.finance.cash + input.salePrice,
+    },
   };
 
   return pushHistory(next, {
@@ -193,5 +197,37 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     imei: phone.imei,
     buyerName,
     phoneId: phone.id,
+  });
+}
+
+export function setCash(state: AppState, cash: number): AppState {
+  if (!Number.isFinite(cash)) {
+    throw new Error('Gotówka musi być liczbą.');
+  }
+  const next: AppState = {
+    ...state,
+    finance: { ...state.finance, cash },
+  };
+  return pushHistory(next, {
+    type: 'finance',
+    date: nowIso(),
+    modelName: 'Gotówka',
+    note: `Ustawiono gotówkę: ${cash} zł`,
+  });
+}
+
+export function setBank(state: AppState, bank: number): AppState {
+  if (!Number.isFinite(bank)) {
+    throw new Error('Stan konta musi być liczbą.');
+  }
+  const next: AppState = {
+    ...state,
+    finance: { ...state.finance, bank },
+  };
+  return pushHistory(next, {
+    type: 'finance',
+    date: nowIso(),
+    modelName: 'Konto',
+    note: `Ustawiono konto: ${bank} zł`,
   });
 }

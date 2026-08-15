@@ -1,5 +1,6 @@
 import type {
   AppState,
+  FinanceSummary,
   ModelStockSummary,
   MonthlyProfitSummary,
   Phone,
@@ -70,6 +71,18 @@ export function getWarehouseTotals(state: AppState): {
 
 export function getTotalProfit(state: AppState): number {
   return state.sales.reduce((sum, sale) => sum + sale.profit, 0);
+}
+
+export function getFinanceSummary(state: AppState): FinanceSummary {
+  const phoneValue = sumStockValue(state.phones);
+  const totalProfit = getTotalProfit(state);
+  return {
+    cash: state.finance.cash,
+    bank: state.finance.bank,
+    phoneValue,
+    totalAssets: state.finance.cash + state.finance.bank + phoneValue,
+    totalProfit,
+  };
 }
 
 export function calcProfit(salePrice: number, purchasePrice: number): number {
