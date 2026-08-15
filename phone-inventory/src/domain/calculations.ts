@@ -2,8 +2,25 @@ import type {
   AppState,
   FinanceSummary,
   ModelStockSummary,
+  MonthlyProfitSummary,
   Phone,
+  SaleRecord,
 } from './types';
+
+const MONTHS_PL = [
+  'Styczeń',
+  'Luty',
+  'Marzec',
+  'Kwiecień',
+  'Maj',
+  'Czerwiec',
+  'Lipiec',
+  'Sierpień',
+  'Wrzesień',
+  'Październik',
+  'Listopad',
+  'Grudzień',
+] as const;
 
 export function sumPurchasePrices(phones: Phone[]): number {
   return phones.reduce((sum, phone) => sum + phone.purchasePrice, 0);
@@ -49,9 +66,7 @@ export function getPhoneValue(state: AppState): number {
 }
 
 export function getTotalProfit(state: AppState): number {
-  return state.history
-    .filter((entry) => entry.type === 'sale' && typeof entry.profit === 'number')
-    .reduce((sum, entry) => sum + (entry.profit ?? 0), 0);
+  return state.sales.reduce((sum, sale) => sum + sale.profit, 0);
 }
 
 export function getFinanceSummary(state: AppState): FinanceSummary {
@@ -88,4 +103,82 @@ export function formatDateTime(iso: string): string {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(iso));
+}
+
+export function formatDateOnly(iso: string): string {
+  return new Intl.DateTimeFormat('pl-PL', {
+    dateStyle: 'medium',
+  }).format(new Date(iso));
+}
+
+/** Local calendar YYYY-MM for a sale timestamp. */
+export function getYearMonth(isoOrDate: string): string {
+  const date = new Date(isoOrDate);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  return `${year}-${month}`;
+}
+
+export function currentYearMonth(now = new Date()): string {
+  return getYearMonth(now.toISOString());
+}
+
+export function shiftYearMonth(yearMonth: string, delta: number): string {
+  const [yearRaw, monthRaw] = yearMonth.split('-').map(Number);
+  const date = new Date(yearRaw, monthRaw - 1 + delta, 1);
+  return getYearMonth(date.toISOString());
+}
+
+export function formatMonthLabel(yearMonth: string, uppercase = true): string {
+  const [yearRaw, monthRaw] = yearMonth.split('-').map(Number);
+  const name = MONTHS_PL[monthRaw - 1] ?? yearMonth;
+  const label = `${name} ${yearRaw}`;
+  return uppercase ? label.toUpperCase() : label;
+}
+
+export function shortMonthLabel(yearMonth: string): string {
+  return formatMonthLabel(yearMonth, false);
+}
+
+/**
+ * Convert `<input type="date">` value (YYYY-MM-DD) to a stable ISO timestamp
+ * at local noon so the calendar day is preserved across timezones.
+ */
+export function dateInputToIso(dateInput: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
+    const [year, month, day] = dateInput.split('-').map(Number);
+    return new Date(year, month - 1, day, 12, 0, 0).toISOString();
+  }
+  return new Date(dateInput).toISOString();
+}
+
+export function isoToDateInput(iso: string): string {
+  const date = new Date(iso);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function getMonthlyProfit(
+  state: AppState,
+  yearMonth: string,
+): MonthlyProfitSummary {
+  const sales = state.sales
+    .filter((sale) => getYearMonth(sale.soldAt) === yearMonth)
+    .sort((a, b) => b.soldAt.localeCompare(a.soldAt));
+
+  return {
+    yearMonth,
+    label: formatMonthLabel(yearMonth),
+    soldCount: sales.length,
+    totalSales: sales.reduce((sum, sale) => sum + sale.salePrice, 0),
+    totalProfit: sales.reduce((sum, sale) => sum + sale.profit, 0),
+    sales,
+  };
+}
+
+export function listSaleYearMonths(sales: SaleRecord[]): string[] {
+  const keys = new Set(sales.map((sale) => getYearMonth(sale.soldAt)));
+  return [...keys].sort();
 }

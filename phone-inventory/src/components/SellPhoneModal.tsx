@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState, type FormEvent } from 'react';
-import { formatPln } from '../domain/calculations';
-import { PHONE_CONDITIONS, type Phone } from '../domain/types';
+import {
+  formatPln,
+  isoToDateInput,
+} from '../domain/calculations';
+import {
+  PHONE_CONDITIONS,
+  STORAGE_OPTIONS,
+  type Phone,
+} from '../domain/types';
 import { Modal } from './Modal';
 
 interface SellPhoneModalProps {
@@ -11,12 +18,26 @@ interface SellPhoneModalProps {
   onSubmit: (data: {
     phoneId: string;
     salePrice: number;
+    soldAt: string;
+    storage?: string;
+    imei?: string;
     depositTo: 'cash' | 'bank';
   }) => void;
 }
 
 function conditionLabel(value: string): string {
   return PHONE_CONDITIONS.find((item) => item.value === value)?.label ?? value;
+}
+
+function applyPhoneDefaults(
+  phone: Phone | undefined,
+  setters: {
+    setStorage: (value: string) => void;
+    setImei: (value: string) => void;
+  },
+) {
+  setters.setStorage(phone?.storage ?? '128 GB');
+  setters.setImei(phone?.imei ?? '');
 }
 
 export function SellPhoneModal({
@@ -27,28 +48,46 @@ export function SellPhoneModal({
   onSubmit,
 }: SellPhoneModalProps) {
   const sorted = useMemo(
-    () =>
-      [...phones].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    () => [...phones].sort((a, b) => a.createdAt.localeCompare(b.createdAt)),
     [phones],
   );
   const [phoneId, setPhoneId] = useState('');
+  const [storage, setStorage] = useState('128 GB');
+  const [imei, setImei] = useState('');
   const [salePrice, setSalePrice] = useState('');
+  const [soldAt, setSoldAt] = useState('');
   const [depositTo, setDepositTo] = useState<'cash' | 'bank'>('cash');
 
   useEffect(() => {
     if (!open) return;
-    setPhoneId(sorted[0]?.id ?? '');
+    const first = sorted[0];
+    setPhoneId(first?.id ?? '');
+    applyPhoneDefaults(first, { setStorage, setImei });
     setSalePrice('');
+    setSoldAt(isoToDateInput(new Date().toISOString()));
     setDepositTo('cash');
   }, [open, sorted]);
 
   const selected = sorted.find((phone) => phone.id === phoneId);
 
+  const handlePhoneChange = (nextId: string) => {
+    setPhoneId(nextId);
+    const phone = sorted.find((item) => item.id === nextId);
+    applyPhoneDefaults(phone, { setStorage, setImei });
+  };
+
   const handleSubmit = (event: FormEvent) => {
     event.preventDefault();
     const price = Number(salePrice.replace(',', '.'));
-    if (!phoneId || !Number.isFinite(price) || price < 0) return;
-    onSubmit({ phoneId, salePrice: price, depositTo });
+    if (!phoneId || !Number.isFinite(price) || price < 0 || !soldAt) return;
+    onSubmit({
+      phoneId,
+      salePrice: price,
+      soldAt,
+      storage: storage.trim() || undefined,
+      imei: imei.trim() || undefined,
+      depositTo,
+    });
     onClose();
   };
 
@@ -73,16 +112,21 @@ export function SellPhoneModal({
       ) : (
         <form id="sell-phone-form" className="form" onSubmit={handleSubmit}>
           <label>
-            Wybierz egzemplarz
+            Model
+            <input type="text" value={modelName} readOnly />
+          </label>
+          <label>
+            Egzemplarz z magazynu
             <select
               value={phoneId}
-              onChange={(e) => setPhoneId(e.target.value)}
+              onChange={(e) => handlePhoneChange(e.target.value)}
               required
             >
               {sorted.map((phone, index) => (
                 <option key={phone.id} value={phone.id}>
                   #{index + 1} · zakup {formatPln(phone.purchasePrice)} ·{' '}
                   {conditionLabel(phone.condition)}
+                  {phone.storage ? ` · ${phone.storage}` : ''}
                   {phone.imei ? ` · IMEI ${phone.imei}` : ''}
                 </option>
               ))}
@@ -90,10 +134,40 @@ export function SellPhoneModal({
           </label>
           {selected ? (
             <div className="info-box">
-              <div>Cena zakupu: <strong>{formatPln(selected.purchasePrice)}</strong></div>
+              <div>
+                Cena zakupu: <strong>{formatPln(selected.purchasePrice)}</strong>
+              </div>
               {selected.note ? <div>Notatka: {selected.note}</div> : null}
             </div>
           ) : null}
+          <label>
+            Pamięć
+            <select
+              value={storage}
+              onChange={(e) => setStorage(e.target.value)}
+              required
+            >
+              {STORAGE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+              {storage &&
+              !(STORAGE_OPTIONS as readonly string[]).includes(storage) ? (
+                <option value={storage}>{storage}</option>
+              ) : null}
+            </select>
+          </label>
+          <label>
+            IMEI
+            <input
+              type="text"
+              value={imei}
+              onChange={(e) => setImei(e.target.value)}
+              placeholder="15 cyfr"
+              inputMode="numeric"
+            />
+          </label>
           <label>
             Cena sprzedaży (zł)
             <input
@@ -108,7 +182,18 @@ export function SellPhoneModal({
               autoFocus
             />
           </label>
-          {selected && salePrice !== '' && Number.isFinite(Number(salePrice.replace(',', '.'))) ? (
+          <label>
+            Data sprzedaży
+            <input
+              type="date"
+              value={soldAt}
+              onChange={(e) => setSoldAt(e.target.value)}
+              required
+            />
+          </label>
+          {selected &&
+          salePrice !== '' &&
+          Number.isFinite(Number(salePrice.replace(',', '.'))) ? (
             <div
               className={`info-box ${
                 Number(salePrice.replace(',', '.')) - selected.purchasePrice >= 0

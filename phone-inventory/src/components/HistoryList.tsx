@@ -50,6 +50,13 @@ export function HistoryList({ entries }: HistoryListProps) {
               <time dateTime={entry.date}>{formatDateTime(entry.date)}</time>
             </div>
             <div className="history-model">{entry.modelName}</div>
+            {(entry.storage || entry.imei) && (
+              <div className="history-note">
+                {[entry.storage, entry.imei ? `IMEI ${entry.imei}` : null]
+                  .filter(Boolean)
+                  .join(' · ')}
+              </div>
+            )}
             <div className="history-meta">
               {typeof entry.purchasePrice === 'number' ? (
                 <span>Zakup: {formatPln(entry.purchasePrice)}</span>

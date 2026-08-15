@@ -1,18 +1,51 @@
-import { STORAGE_KEY } from '../domain/defaults';
-import type { AppState } from '../domain/types';
+import { createId, createInitialState } from '../domain/defaults';
+import type { AppState, HistoryEntry, SaleRecord } from '../domain/types';
 import type { InventoryRepository } from './types';
+import { STORAGE_KEY } from '../domain/defaults';
 
-function isAppState(value: unknown): value is AppState {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Partial<AppState>;
-  return (
-    candidate.version === 1 &&
-    Array.isArray(candidate.models) &&
-    Array.isArray(candidate.phones) &&
-    Array.isArray(candidate.history) &&
-    typeof candidate.finance === 'object' &&
-    candidate.finance !== null
-  );
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function migrateSalesFromHistory(history: HistoryEntry[]): SaleRecord[] {
+  return history
+    .filter((entry) => entry.type === 'sale' && typeof entry.salePrice === 'number')
+    .map((entry) => ({
+      id: entry.id || createId(),
+      phoneId: entry.phoneId ?? createId(),
+      modelId: 'unknown',
+      modelName: entry.modelName,
+      storage: entry.storage,
+      imei: entry.imei,
+      purchasePrice: entry.purchasePrice ?? 0,
+      salePrice: entry.salePrice ?? 0,
+      profit:
+        typeof entry.profit === 'number'
+          ? entry.profit
+          : (entry.salePrice ?? 0) - (entry.purchasePrice ?? 0),
+      soldAt: entry.date,
+    }));
+}
+
+/** Accept v1 (no sales) and v2 payloads; always return AppState v2. */
+export function normalizeAppState(value: unknown): AppState | null {
+  if (!isObject(value)) return null;
+  if (!Array.isArray(value.models) || !Array.isArray(value.phones)) return null;
+  if (!Array.isArray(value.history) || !isObject(value.finance)) return null;
+
+  const history = value.history as HistoryEntry[];
+  const sales = Array.isArray(value.sales)
+    ? (value.sales as SaleRecord[])
+    : migrateSalesFromHistory(history);
+
+  return {
+    version: 2,
+    models: value.models as AppState['models'],
+    phones: value.phones as AppState['phones'],
+    sales,
+    finance: value.finance as unknown as AppState['finance'],
+    history,
+  };
 }
 
 export class LocalStorageRepository implements InventoryRepository {
@@ -35,7 +68,7 @@ export class LocalStorageRepository implements InventoryRepository {
       const raw = this.storage.getItem(this.key);
       if (!raw) return null;
       const parsed: unknown = JSON.parse(raw);
-      return isAppState(parsed) ? parsed : null;
+      return normalizeAppState(parsed);
     } catch {
       return null;
     }
@@ -65,7 +98,7 @@ export class RemoteInventoryRepository implements InventoryRepository {
     if (!response.ok) {
       throw new Error(`Nie udało się pobrać danych (${response.status}).`);
     }
-    return (await response.json()) as AppState;
+    return normalizeAppState(await response.json()) ?? createInitialState();
   }
 
   async save(state: AppState): Promise<void> {

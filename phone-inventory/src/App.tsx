@@ -6,10 +6,29 @@ import { EditFinanceModal } from './components/EditFinanceModal';
 import { FinancePanel } from './components/FinancePanel';
 import { HistoryList } from './components/HistoryList';
 import { ModelCard } from './components/ModelCard';
+import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
 import { SearchBar } from './components/SearchBar';
 import { SellPhoneModal } from './components/SellPhoneModal';
+import {
+  currentYearMonth,
+  getMonthlyProfit,
+  shiftYearMonth,
+} from './domain/calculations';
 import { useAppStore } from './hooks/useAppStore';
 import './App.css';
+
+function tabTitle(tab: TabId): string {
+  switch (tab) {
+    case 'magazyn':
+      return 'Magazyn';
+    case 'zysk':
+      return 'Zysk';
+    case 'finanse':
+      return 'Finanse';
+    case 'historia':
+      return 'Historia';
+  }
+}
 
 function AppShell() {
   const {
@@ -36,6 +55,7 @@ function AppShell() {
   const [sellModelId, setSellModelId] = useState<string | null>(null);
   const [editCashOpen, setEditCashOpen] = useState(false);
   const [editBankOpen, setEditBankOpen] = useState(false);
+  const [profitMonth, setProfitMonth] = useState(() => currentYearMonth());
 
   const sortedModels = useMemo(
     () =>
@@ -47,6 +67,13 @@ function AppShell() {
   const sellPhones = sellModelId
     ? state.phones.filter((phone) => phone.modelId === sellModelId)
     : [];
+
+  const monthly = useMemo(
+    () => getMonthlyProfit(state, profitMonth),
+    [state, profitMonth],
+  );
+  const prevMonth = shiftYearMonth(profitMonth, -1);
+  const nextMonth = shiftYearMonth(profitMonth, 1);
 
   if (!ready) {
     return (
@@ -62,13 +89,7 @@ function AppShell() {
       <header className="app-header">
         <div>
           <p className="eyebrow">Phone Inventory</p>
-          <h1>
-            {tab === 'magazyn'
-              ? 'Magazyn'
-              : tab === 'finanse'
-                ? 'Finanse'
-                : 'Historia'}
-          </h1>
+          <h1>{tabTitle(tab)}</h1>
         </div>
         <div className="header-stats">
           <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
@@ -133,6 +154,16 @@ function AppShell() {
               )}
             </div>
           </>
+        ) : null}
+
+        {tab === 'zysk' ? (
+          <MonthlyProfitPanel
+            summary={monthly}
+            prevMonth={prevMonth}
+            nextMonth={nextMonth}
+            onPrev={() => setProfitMonth(prevMonth)}
+            onNext={() => setProfitMonth(nextMonth)}
+          />
         ) : null}
 
         {tab === 'finanse' ? (

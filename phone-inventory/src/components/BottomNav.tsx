@@ -1,4 +1,4 @@
-export type TabId = 'magazyn' | 'finanse' | 'historia';
+export type TabId = 'magazyn' | 'zysk' | 'finanse' | 'historia';
 
 interface BottomNavProps {
   active: TabId;
@@ -7,6 +7,7 @@ interface BottomNavProps {
 
 const TABS: { id: TabId; label: string; icon: string }[] = [
   { id: 'magazyn', label: 'Magazyn', icon: '📱' },
+  { id: 'zysk', label: 'Zysk', icon: '📈' },
   { id: 'finanse', label: 'Finanse', icon: '💰' },
   { id: 'historia', label: 'Historia', icon: '📜' },
 ];

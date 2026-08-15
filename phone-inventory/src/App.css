@@ -369,9 +369,9 @@
   transform: translateX(-50%);
   width: min(720px, 100%);
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 4px;
-  padding: 8px 10px calc(8px + var(--safe-bottom));
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  padding: 8px 8px calc(8px + var(--safe-bottom));
   background: rgba(10, 14, 24, 0.92);
   border-top: 1px solid var(--border);
   backdrop-filter: blur(16px);
@@ -387,8 +387,8 @@
   border: 0;
   color: var(--text-muted);
   border-radius: 14px;
-  padding: 8px 6px;
-  font-size: 0.75rem;
+  padding: 8px 4px;
+  font-size: 0.7rem;
   font-weight: 600;
 }
 
@@ -580,6 +580,124 @@
 .history-note {
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+
+.monthly-profit {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.month-nav {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  align-items: center;
+}
+
+.month-nav-btn {
+  border: 1px solid var(--border);
+  background: var(--bg-card);
+  border-radius: 999px;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.month-nav-btn:first-child {
+  justify-self: start;
+}
+
+.month-nav-btn:last-child {
+  justify-self: end;
+}
+
+.month-current {
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-align: center;
+  font-size: clamp(0.95rem, 3.6vw, 1.15rem);
+}
+
+.monthly-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+}
+
+.monthly-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+}
+
+.monthly-stat.wide {
+  grid-column: 1 / -1;
+}
+
+.monthly-stat-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: clamp(1.2rem, 4.5vw, 1.6rem);
+  font-weight: 700;
+}
+
+.sale-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.sale-item {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sale-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: baseline;
+}
+
+.sale-top time {
+  color: var(--text-muted);
+  font-size: 0.78rem;
+}
+
+.sale-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+
+.sale-money {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
 }
 
 .positive {

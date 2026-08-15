@@ -1,10 +1,11 @@
 import { createId } from './defaults';
-import { calcProfit } from './calculations';
+import { calcProfit, dateInputToIso } from './calculations';
 import type {
   AddModelInput,
   AddPhoneInput,
   AppState,
   HistoryEntry,
+  SaleRecord,
   SellPhoneInput,
 } from './types';
 
@@ -53,6 +54,7 @@ export function addPhone(state: AppState, input: AddPhoneInput): AppState {
     id: createId(),
     modelId: input.modelId,
     purchasePrice: input.purchasePrice,
+    storage: input.storage?.trim() || undefined,
     imei: input.imei?.trim() || undefined,
     condition: input.condition,
     note: input.note?.trim() || undefined,
@@ -80,6 +82,8 @@ export function addPhone(state: AppState, input: AddPhoneInput): AppState {
     date: phone.createdAt,
     modelName: model.name,
     purchasePrice: phone.purchasePrice,
+    storage: phone.storage,
+    imei: phone.imei,
     note: phone.note,
     phoneId: phone.id,
   });
@@ -118,7 +122,7 @@ export function decrementStock(state: AppState, modelId: string): AppState {
   }
 
   const removed = phones[0];
-  let next: AppState = {
+  const next: AppState = {
     ...state,
     phones: state.phones.filter((phone) => phone.id !== removed.id),
     finance: {
@@ -132,6 +136,8 @@ export function decrementStock(state: AppState, modelId: string): AppState {
     date: nowIso(),
     modelName: model.name,
     purchasePrice: removed.purchasePrice,
+    storage: removed.storage,
+    imei: removed.imei,
     note: 'Usunięto ze stanu (−)',
     phoneId: removed.id,
   });
@@ -141,6 +147,9 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
   if (!Number.isFinite(input.salePrice) || input.salePrice < 0) {
     throw new Error('Cena sprzedaży musi być liczbą ≥ 0.');
   }
+  if (!input.soldAt?.trim()) {
+    throw new Error('Data sprzedaży jest wymagana.');
+  }
 
   const phone = state.phones.find((item) => item.id === input.phoneId);
   if (!phone) {
@@ -149,9 +158,24 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
 
   const model = state.models.find((item) => item.id === phone.modelId);
   const modelName = model?.name ?? 'Nieznany model';
+  const storage = (input.storage ?? phone.storage)?.trim() || undefined;
+  const imei = (input.imei ?? phone.imei)?.trim() || undefined;
   const profit = calcProfit(input.salePrice, phone.purchasePrice);
   const depositTo = input.depositTo ?? 'cash';
-  const soldAt = nowIso();
+  const soldAt = dateInputToIso(input.soldAt.trim());
+
+  const sale: SaleRecord = {
+    id: createId(),
+    phoneId: phone.id,
+    modelId: phone.modelId,
+    modelName,
+    storage,
+    imei,
+    purchasePrice: phone.purchasePrice,
+    salePrice: input.salePrice,
+    profit,
+    soldAt,
+  };
 
   const finance = { ...state.finance };
   finance[depositTo] = finance[depositTo] + input.salePrice;
@@ -159,6 +183,7 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
   const next: AppState = {
     ...state,
     phones: state.phones.filter((item) => item.id !== phone.id),
+    sales: [sale, ...state.sales],
     finance,
   };
 
@@ -169,6 +194,8 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     purchasePrice: phone.purchasePrice,
     salePrice: input.salePrice,
     profit,
+    storage,
+    imei,
     phoneId: phone.id,
   });
 }

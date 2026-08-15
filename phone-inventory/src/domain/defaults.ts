@@ -39,9 +39,10 @@ export function createInitialModels(now = new Date().toISOString()): Model[] {
 
 export function createInitialState(now = new Date().toISOString()): AppState {
   return {
-    version: 1,
+    version: 2,
     models: createInitialModels(now),
     phones: [],
+    sales: [],
     finance: { cash: 0, bank: 0 },
     history: [],
   };

@@ -15,6 +15,16 @@ export const PHONE_CONDITIONS: { value: PhoneCondition; label: string }[] = [
   { value: 'uszkodzony', label: 'Uszkodzony' },
 ];
 
+export const STORAGE_OPTIONS = [
+  '64 GB',
+  '128 GB',
+  '256 GB',
+  '512 GB',
+  '1 TB',
+] as const;
+
+export type StorageOption = (typeof STORAGE_OPTIONS)[number] | string;
+
 export interface Model {
   id: string;
   name: string;
@@ -25,10 +35,25 @@ export interface Phone {
   id: string;
   modelId: string;
   purchasePrice: number;
+  storage?: string;
   imei?: string;
   condition: PhoneCondition;
   note?: string;
   createdAt: string;
+}
+
+/** Durable sale record used for monthly profit. */
+export interface SaleRecord {
+  id: string;
+  phoneId: string;
+  modelId: string;
+  modelName: string;
+  storage?: string;
+  imei?: string;
+  purchasePrice: number;
+  salePrice: number;
+  profit: number;
+  soldAt: string;
 }
 
 export interface Finance {
@@ -46,14 +71,17 @@ export interface HistoryEntry {
   purchasePrice?: number;
   salePrice?: number;
   profit?: number;
+  storage?: string;
+  imei?: string;
   note?: string;
   phoneId?: string;
 }
 
 export interface AppState {
-  version: 1;
+  version: 2;
   models: Model[];
   phones: Phone[];
+  sales: SaleRecord[];
   finance: Finance;
   history: HistoryEntry[];
 }
@@ -74,9 +102,19 @@ export interface FinanceSummary {
   totalProfit: number;
 }
 
+export interface MonthlyProfitSummary {
+  yearMonth: string;
+  label: string;
+  soldCount: number;
+  totalSales: number;
+  totalProfit: number;
+  sales: SaleRecord[];
+}
+
 export interface AddPhoneInput {
   modelId: string;
   purchasePrice: number;
+  storage?: string;
   imei?: string;
   condition: PhoneCondition;
   note?: string;
@@ -87,6 +125,10 @@ export interface AddPhoneInput {
 export interface SellPhoneInput {
   phoneId: string;
   salePrice: number;
+  /** Local calendar date YYYY-MM-DD or ISO datetime. */
+  soldAt: string;
+  storage?: string;
+  imei?: string;
   /** Where sale proceeds go. Default 'cash'. */
   depositTo?: 'cash' | 'bank';
 }

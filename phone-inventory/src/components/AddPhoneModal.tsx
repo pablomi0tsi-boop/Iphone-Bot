@@ -1,5 +1,9 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import { PHONE_CONDITIONS, type PhoneCondition } from '../domain/types';
+import {
+  PHONE_CONDITIONS,
+  STORAGE_OPTIONS,
+  type PhoneCondition,
+} from '../domain/types';
 import { Modal } from './Modal';
 
 interface AddPhoneModalProps {
@@ -10,6 +14,7 @@ interface AddPhoneModalProps {
   onSubmit: (data: {
     modelId: string;
     purchasePrice: number;
+    storage?: string;
     imei?: string;
     condition: PhoneCondition;
     note?: string;
@@ -25,6 +30,7 @@ export function AddPhoneModal({
 }: AddPhoneModalProps) {
   const [modelId, setModelId] = useState('');
   const [purchasePrice, setPurchasePrice] = useState('');
+  const [storage, setStorage] = useState<string>('128 GB');
   const [imei, setImei] = useState('');
   const [condition, setCondition] = useState<PhoneCondition>('dobry');
   const [note, setNote] = useState('');
@@ -33,6 +39,7 @@ export function AddPhoneModal({
     if (!open) return;
     setModelId(presetModelId ?? models[0]?.id ?? '');
     setPurchasePrice('');
+    setStorage('128 GB');
     setImei('');
     setCondition('dobry');
     setNote('');
@@ -45,6 +52,7 @@ export function AddPhoneModal({
     onSubmit({
       modelId,
       purchasePrice: price,
+      storage: storage.trim() || undefined,
       imei: imei.trim() || undefined,
       condition,
       note: note.trim() || undefined,
@@ -92,6 +100,20 @@ export function AddPhoneModal({
             required
             autoFocus
           />
+        </label>
+        <label>
+          Pamięć
+          <select
+            value={storage}
+            onChange={(e) => setStorage(e.target.value)}
+            required
+          >
+            {STORAGE_OPTIONS.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
         </label>
         <label>
           IMEI (opcjonalnie)

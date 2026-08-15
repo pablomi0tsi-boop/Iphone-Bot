@@ -61,12 +61,17 @@ test('visual walkthrough demo', async ({ page }) => {
   await expect(card.locator('.qty-number')).toHaveText('0');
   await pause(900);
 
+  await page.getByRole('navigation').getByRole('button', { name: 'Zysk' }).click();
+  await pause(1200);
   await page.getByRole('navigation').getByRole('button', { name: 'Historia' }).click();
   await pause(1200);
   await page.getByRole('navigation').getByRole('button', { name: 'Finanse' }).click();
   await pause(1200);
   await page.reload();
   await pause(1000);
+  await page.getByRole('navigation').getByRole('button', { name: 'Zysk' }).click();
+  await expect(page.locator('.monthly-stats')).toContainText('500');
+  await pause(800);
   await page.getByRole('navigation').getByRole('button', { name: 'Finanse' }).click();
   await expect(page.locator('.finance-card.wide')).toContainText('500');
   await pause(1200);
