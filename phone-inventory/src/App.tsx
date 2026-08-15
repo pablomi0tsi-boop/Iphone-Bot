@@ -1,34 +1,22 @@
 import { useMemo, useState } from 'react';
-import { AddModelModal } from './components/AddModelModal';
-import { AddPhoneModal } from './components/AddPhoneModal';
 import { BottomNav, type TabId } from './components/BottomNav';
-import { EditFinanceModal } from './components/EditFinanceModal';
-import { FinancePanel } from './components/FinancePanel';
-import { HistoryList } from './components/HistoryList';
-import { ModelCard } from './components/ModelCard';
+import { MagazynHome } from './components/MagazynHome';
+import { ModelDetail } from './components/ModelDetail';
 import { MonthlyProfitPanel } from './components/MonthlyProfitPanel';
-import { SearchBar } from './components/SearchBar';
-import { SellPhoneModal } from './components/SellPhoneModal';
+import { PhoneFormModal } from './components/PhoneFormModal';
 import {
   currentYearMonth,
   getMonthlyProfit,
+  getPhonesForModel,
   shiftYearMonth,
+  sumStockValue,
 } from './domain/calculations';
 import { useAppStore } from './hooks/useAppStore';
 import './App.css';
 
-function tabTitle(tab: TabId): string {
-  switch (tab) {
-    case 'magazyn':
-      return 'Magazyn';
-    case 'zysk':
-      return 'Zysk';
-    case 'finanse':
-      return 'Finanse';
-    case 'historia':
-      return 'Historia';
-  }
-}
+type MagazynView =
+  | { kind: 'home' }
+  | { kind: 'model'; modelId: string };
 
 function AppShell() {
   const {
@@ -37,24 +25,21 @@ function AppShell() {
     search,
     setSearch,
     filteredSummaries,
-    finance,
-    addModel,
+    totals,
     addPhone,
-    decrementStock,
+    updatePhone,
+    removePhone,
     sellPhone,
-    setCash,
-    setBank,
     error,
     clearError,
   } = useAppStore();
 
   const [tab, setTab] = useState<TabId>('magazyn');
-  const [addPhoneOpen, setAddPhoneOpen] = useState(false);
-  const [addModelOpen, setAddModelOpen] = useState(false);
+  const [view, setView] = useState<MagazynView>({ kind: 'home' });
+  const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState<'add' | 'edit'>('add');
   const [presetModelId, setPresetModelId] = useState<string | null>(null);
-  const [sellModelId, setSellModelId] = useState<string | null>(null);
-  const [editCashOpen, setEditCashOpen] = useState(false);
-  const [editBankOpen, setEditBankOpen] = useState(false);
+  const [editPhoneId, setEditPhoneId] = useState<string | null>(null);
   const [profitMonth, setProfitMonth] = useState(() => currentYearMonth());
 
   const sortedModels = useMemo(
@@ -63,17 +48,21 @@ function AppShell() {
     [state.models],
   );
 
-  const sellModel = state.models.find((model) => model.id === sellModelId);
-  const sellPhones = sellModelId
-    ? state.phones.filter((phone) => phone.modelId === sellModelId)
+  const activeModel =
+    view.kind === 'model'
+      ? state.models.find((model) => model.id === view.modelId)
+      : undefined;
+  const modelPhones = activeModel
+    ? getPhonesForModel(state, activeModel.id)
     : [];
+  const editPhone = editPhoneId
+    ? state.phones.find((phone) => phone.id === editPhoneId)
+    : null;
 
   const monthly = useMemo(
     () => getMonthlyProfit(state, profitMonth),
     [state, profitMonth],
   );
-  const prevMonth = shiftYearMonth(profitMonth, -1);
-  const nextMonth = shiftYearMonth(profitMonth, 1);
 
   if (!ready) {
     return (
@@ -86,17 +75,6 @@ function AppShell() {
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <div>
-          <p className="eyebrow">Phone Inventory</p>
-          <h1>{tabTitle(tab)}</h1>
-        </div>
-        <div className="header-stats">
-          <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
-          <small>wartość telefonów</small>
-        </div>
-      </header>
-
       {error ? (
         <div className="toast error" role="alert">
           <span>{error}</span>
@@ -107,121 +85,102 @@ function AppShell() {
       ) : null}
 
       <main className="app-main">
-        {tab === 'magazyn' ? (
-          <>
-            <FinancePanel
-              finance={finance}
-              compact
-              onEditCash={() => setEditCashOpen(true)}
-              onEditBank={() => setEditBankOpen(true)}
-            />
-            <SearchBar value={search} onChange={setSearch} />
-            <div className="action-row">
-              <button
-                type="button"
-                className="btn primary"
-                onClick={() => {
-                  setPresetModelId(null);
-                  setAddPhoneOpen(true);
-                }}
-              >
-                + Dodaj telefon
-              </button>
-              <button
-                type="button"
-                className="btn ghost"
-                onClick={() => setAddModelOpen(true)}
-              >
-                + Model
-              </button>
-            </div>
-            <div className="model-list">
-              {filteredSummaries.length === 0 ? (
-                <p className="empty-hint">Brak modeli pasujących do wyszukiwania.</p>
-              ) : (
-                filteredSummaries.map((summary) => (
-                  <ModelCard
-                    key={summary.model.id}
-                    summary={summary}
-                    onIncrement={() => {
-                      setPresetModelId(summary.model.id);
-                      setAddPhoneOpen(true);
-                    }}
-                    onDecrement={() => decrementStock(summary.model.id)}
-                    onSell={() => setSellModelId(summary.model.id)}
-                  />
-                ))
-              )}
-            </div>
-          </>
+        {tab === 'magazyn' && view.kind === 'home' ? (
+          <MagazynHome
+            phoneCount={totals.phoneCount}
+            stockValue={totals.stockValue}
+            search={search}
+            onSearch={setSearch}
+            summaries={filteredSummaries}
+            onOpenModel={(modelId) => setView({ kind: 'model', modelId })}
+            onAddPhone={() => {
+              setFormMode('add');
+              setPresetModelId(null);
+              setEditPhoneId(null);
+              setFormOpen(true);
+            }}
+          />
+        ) : null}
+
+        {tab === 'magazyn' && view.kind === 'model' && activeModel ? (
+          <ModelDetail
+            model={activeModel}
+            phones={modelPhones}
+            stockValue={sumStockValue(modelPhones)}
+            onBack={() => setView({ kind: 'home' })}
+            onOpenPhone={(phoneId) => {
+              setFormMode('edit');
+              setEditPhoneId(phoneId);
+              setPresetModelId(null);
+              setFormOpen(true);
+            }}
+            onAddPhone={() => {
+              setFormMode('add');
+              setPresetModelId(activeModel.id);
+              setEditPhoneId(null);
+              setFormOpen(true);
+            }}
+          />
         ) : null}
 
         {tab === 'zysk' ? (
           <MonthlyProfitPanel
             summary={monthly}
-            prevMonth={prevMonth}
-            nextMonth={nextMonth}
-            onPrev={() => setProfitMonth(prevMonth)}
-            onNext={() => setProfitMonth(nextMonth)}
+            prevMonth={shiftYearMonth(profitMonth, -1)}
+            nextMonth={shiftYearMonth(profitMonth, 1)}
+            onPrev={() => setProfitMonth(shiftYearMonth(profitMonth, -1))}
+            onNext={() => setProfitMonth(shiftYearMonth(profitMonth, 1))}
           />
-        ) : null}
-
-        {tab === 'finanse' ? (
-          <FinancePanel
-            finance={finance}
-            onEditCash={() => setEditCashOpen(true)}
-            onEditBank={() => setEditBankOpen(true)}
-          />
-        ) : null}
-
-        {tab === 'historia' ? (
-          <HistoryList entries={state.history} />
         ) : null}
       </main>
 
-      <BottomNav active={tab} onChange={setTab} />
-
-      <AddPhoneModal
-        open={addPhoneOpen}
-        onClose={() => {
-          setAddPhoneOpen(false);
-          setPresetModelId(null);
+      <BottomNav
+        active={tab}
+        onChange={(next) => {
+          setTab(next);
+          if (next === 'magazyn') setView({ kind: 'home' });
         }}
+      />
+
+      <PhoneFormModal
+        open={formOpen}
+        mode={formMode}
         models={sortedModels}
         presetModelId={presetModelId}
-        onSubmit={(data) => addPhone(data)}
-      />
-
-      <AddModelModal
-        open={addModelOpen}
-        onClose={() => setAddModelOpen(false)}
-        onSubmit={(name) => addModel({ name })}
-      />
-
-      <SellPhoneModal
-        open={Boolean(sellModelId)}
-        onClose={() => setSellModelId(null)}
-        phones={sellPhones}
-        modelName={sellModel?.name ?? ''}
-        onSubmit={(data) => sellPhone(data)}
-      />
-
-      <EditFinanceModal
-        open={editCashOpen}
-        title="Gotówka"
-        label="Stan gotówki (zł)"
-        value={finance.cash}
-        onClose={() => setEditCashOpen(false)}
-        onSubmit={setCash}
-      />
-
-      <EditFinanceModal
-        open={editBankOpen}
-        title="Stan konta"
-        label="Stan konta (zł)"
-        value={finance.bank}
-        onClose={() => setEditBankOpen(false)}
-        onSubmit={setBank}
+        phone={editPhone}
+        onClose={() => {
+          setFormOpen(false);
+          setEditPhoneId(null);
+          setPresetModelId(null);
+        }}
+        onSubmit={(data) => {
+          if (formMode === 'edit' && editPhoneId) {
+            updatePhone({ phoneId: editPhoneId, ...data });
+          } else {
+            addPhone(data);
+          }
+        }}
+        onSell={
+          formMode === 'edit' && editPhoneId
+            ? (data) => {
+                sellPhone({ phoneId: editPhoneId, ...data });
+                setView(
+                  activeModel
+                    ? { kind: 'model', modelId: activeModel.id }
+                    : { kind: 'home' },
+                );
+              }
+            : undefined
+        }
+        onDelete={
+          formMode === 'edit' && editPhoneId
+            ? () => {
+                removePhone(editPhoneId);
+                setFormOpen(false);
+                setEditPhoneId(null);
+              }
+            : undefined
+        }
       />
     </div>
   );

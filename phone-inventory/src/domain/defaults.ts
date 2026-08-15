@@ -1,26 +1,7 @@
+import { CATALOG_MODELS, normalizeModelName } from './catalog';
 import type { AppState, Model } from './types';
 
 export const STORAGE_KEY = 'phone-inventory:v1';
-
-export const INITIAL_MODEL_NAMES = [
-  'iPhone 11',
-  'iPhone 11 Pro',
-  'iPhone 11 Pro Max',
-  'iPhone 12',
-  'iPhone 12 Pro',
-  'iPhone 12 Pro Max',
-  'iPhone 13',
-  'iPhone 13 mini',
-  'iPhone 13 Pro',
-  'iPhone 13 Pro Max',
-  'iPhone 14',
-  'iPhone 14 Pro',
-  'iPhone 14 Pro Max',
-  'iPhone 15',
-  'iPhone 15 Pro',
-  'iPhone 15 Pro Max',
-  'iPhone 16',
-] as const;
 
 export function createId(): string {
   if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
@@ -30,20 +11,50 @@ export function createId(): string {
 }
 
 export function createInitialModels(now = new Date().toISOString()): Model[] {
-  return INITIAL_MODEL_NAMES.map((name) => ({
+  return CATALOG_MODELS.map((name) => ({
     id: createId(),
     name,
     createdAt: now,
   }));
 }
 
+/** Ensure catalog models exist; keep existing ids when names match. */
+export function ensureCatalogModels(
+  models: Model[],
+  now = new Date().toISOString(),
+): Model[] {
+  const byName = new Map<string, Model>();
+  for (const model of models) {
+    const name = normalizeModelName(model.name);
+    if (!byName.has(name.toLowerCase())) {
+      byName.set(name.toLowerCase(), { ...model, name });
+    }
+  }
+
+  const next: Model[] = [];
+  for (const catalogName of CATALOG_MODELS) {
+    const existing = byName.get(catalogName.toLowerCase());
+    if (existing) {
+      next.push({ ...existing, name: catalogName });
+      byName.delete(catalogName.toLowerCase());
+    } else {
+      next.push({ id: createId(), name: catalogName, createdAt: now });
+    }
+  }
+
+  // Keep any custom models that aren't in the catalog.
+  for (const leftover of byName.values()) {
+    next.push(leftover);
+  }
+  return next;
+}
+
 export function createInitialState(now = new Date().toISOString()): AppState {
   return {
-    version: 2,
+    version: 3,
     models: createInitialModels(now),
     phones: [],
     sales: [],
-    finance: { cash: 0, bank: 0 },
     history: [],
   };
 }

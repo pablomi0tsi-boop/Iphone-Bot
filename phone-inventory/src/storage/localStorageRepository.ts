@@ -1,10 +1,71 @@
-import { createId, createInitialState } from '../domain/defaults';
-import type { AppState, HistoryEntry, SaleRecord } from '../domain/types';
-import type { InventoryRepository } from './types';
+import { defaultListedValue, normalizeModelName } from '../domain/catalog';
+import { createId, createInitialState, ensureCatalogModels } from '../domain/defaults';
 import { STORAGE_KEY } from '../domain/defaults';
+import type {
+  AppState,
+  HistoryEntry,
+  Phone,
+  PhoneCondition,
+  SaleRecord,
+} from '../domain/types';
+import type { InventoryRepository } from './types';
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function mapLegacyCondition(value: unknown): PhoneCondition {
+  switch (value) {
+    case 'idealny':
+    case 'bardzo_dobry':
+    case 'dobry':
+    case 'uzywany':
+    case 'uszkodzony':
+      return value;
+    case 'nowy':
+      return 'idealny';
+    case 'zadrapania':
+      return 'uzywany';
+    default:
+      return 'dobry';
+  }
+}
+
+function migratePhone(
+  raw: Record<string, unknown>,
+  models: AppState['models'],
+): Phone | null {
+  if (typeof raw.id !== 'string' || typeof raw.modelId !== 'string') return null;
+  const model = models.find((item) => item.id === raw.modelId);
+  const modelName = model?.name ?? '';
+  const storage =
+    typeof raw.storage === 'string' && raw.storage.trim()
+      ? raw.storage.trim()
+      : '128 GB';
+  const purchasePrice =
+    typeof raw.purchasePrice === 'number' ? raw.purchasePrice : 0;
+  const listedValue =
+    typeof raw.listedValue === 'number'
+      ? raw.listedValue
+      : (defaultListedValue(modelName, storage) ?? purchasePrice);
+  const createdAt =
+    typeof raw.createdAt === 'string' ? raw.createdAt : new Date().toISOString();
+
+  return {
+    id: raw.id,
+    modelId: raw.modelId,
+    storage,
+    imei: typeof raw.imei === 'string' ? raw.imei : '',
+    batteryPercent:
+      typeof raw.batteryPercent === 'number' ? raw.batteryPercent : 100,
+    condition: mapLegacyCondition(raw.condition),
+    note: typeof raw.note === 'string' ? raw.note : undefined,
+    purchasePrice,
+    listedValue,
+    createdAt,
+    updatedAt:
+      typeof raw.updatedAt === 'string' ? raw.updatedAt : createdAt,
+  };
 }
 
 function migrateSalesFromHistory(history: HistoryEntry[]): SaleRecord[] {
@@ -27,11 +88,33 @@ function migrateSalesFromHistory(history: HistoryEntry[]): SaleRecord[] {
     }));
 }
 
-/** Accept v1 (no sales) and v2 payloads; always return AppState v2. */
+/** Accept older payloads; always return AppState v3. */
 export function normalizeAppState(value: unknown): AppState | null {
   if (!isObject(value)) return null;
   if (!Array.isArray(value.models) || !Array.isArray(value.phones)) return null;
-  if (!Array.isArray(value.history) || !isObject(value.finance)) return null;
+  if (!Array.isArray(value.history)) return null;
+
+  const models = ensureCatalogModels(
+    (value.models as AppState['models']).map((model) => ({
+      ...model,
+      name: normalizeModelName(model.name),
+    })),
+  );
+
+  const phones = (value.phones as unknown[])
+    .map((item) => (isObject(item) ? migratePhone(item, models) : null))
+    .filter((item): item is Phone => item !== null)
+    .map((phone) => {
+      // Remap modelId if name was normalized onto a catalog model with different id
+      const oldModel = (value.models as AppState['models']).find(
+        (m) => m.id === phone.modelId,
+      );
+      if (!oldModel) return phone;
+      const canonical = models.find(
+        (m) => m.name.toLowerCase() === normalizeModelName(oldModel.name).toLowerCase(),
+      );
+      return canonical ? { ...phone, modelId: canonical.id } : phone;
+    });
 
   const history = value.history as HistoryEntry[];
   const sales = Array.isArray(value.sales)
@@ -39,11 +122,10 @@ export function normalizeAppState(value: unknown): AppState | null {
     : migrateSalesFromHistory(history);
 
   return {
-    version: 2,
-    models: value.models as AppState['models'],
-    phones: value.phones as AppState['phones'],
+    version: 3,
+    models,
+    phones,
     sales,
-    finance: value.finance as unknown as AppState['finance'],
     history,
   };
 }
@@ -67,8 +149,7 @@ export class LocalStorageRepository implements InventoryRepository {
     try {
       const raw = this.storage.getItem(this.key);
       if (!raw) return null;
-      const parsed: unknown = JSON.parse(raw);
-      return normalizeAppState(parsed);
+      return normalizeAppState(JSON.parse(raw));
     } catch {
       return null;
     }
@@ -85,7 +166,6 @@ export class LocalStorageRepository implements InventoryRepository {
   }
 }
 
-/** Placeholder for a future REST/Supabase/etc. backend. */
 export class RemoteInventoryRepository implements InventoryRepository {
   private readonly endpoint: string;
 

@@ -1,12 +1,12 @@
 # Magazyn telefonów
 
-Prosta, mobilna aplikacja do zarządzania magazynem iPhone’ów i finansami firmy.
+Prosta, mobilna aplikacja do zarządzania magazynem konkretnych iPhone’ów.
 
 ## Stack
 
 - React 19 + TypeScript + Vite
-- Persystencja: `localStorage` przez abstrakcję `InventoryRepository`
-- Gotowy port `RemoteInventoryRepository` pod przyszłe API / sync w chmurze
+- Persystencja: `localStorage` przez `InventoryRepository`
+- Cennik wariantów pamięci w `src/domain/catalog.ts`
 
 ## Uruchomienie
 
@@ -35,11 +35,9 @@ npm run build
 
 ## Funkcje
 
-- Lista modeli z ilością, średnią ceną zakupu i wartością magazynową
-- Przyciski `−` / `+` oraz formularz „Dodaj telefon” (pamięć, IMEI, stan)
-- Sprzedaż z datą, pamięcią i IMEI — zysk = sprzedaż − zakup
-- Zakładka **Zysk**: miesięczny obrót i zysk z nawigacją miesięcy
-- Panel finansów: gotówka, konto, wartość telefonów, majątek, łączny zysk
-- Historia operacji (od najnowszych)
-- Wyszukiwanie modeli
+- Lista modeli z liczbą sztuk
+- Każdy telefon to osobny rekord (IMEI, pamięć, bateria, stan, ceny)
+- Formularz „DODAJ TELEFON” z pamięcią zależną od modelu i domyślną wartością z cennika
+- Widok modelu z listą egzemplarzy + edycja / sprzedaż
+- Zakładka **Zysk**: miesięczny obrót i zysk
 - Dane przeżywają odświeżenie strony

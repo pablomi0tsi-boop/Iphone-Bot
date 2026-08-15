@@ -1,27 +1,10 @@
 :root {
   color-scheme: dark;
-  --bg: #070b14;
-  --bg-elevated: #101827;
-  --bg-card: #151e2e;
-  --bg-card-hover: #1a2438;
-  --border: rgba(255, 255, 255, 0.08);
-  --text: #eef3ff;
-  --text-muted: #8b97b0;
-  --accent: #3ddc97;
-  --accent-dim: rgba(61, 220, 151, 0.15);
-  --danger: #ff6b7a;
-  --danger-dim: rgba(255, 107, 122, 0.15);
-  --warning: #ffc857;
-  --shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  --radius: 18px;
-  --radius-sm: 12px;
-  --nav-height: 72px;
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
   font-family: 'DM Sans', system-ui, sans-serif;
-  line-height: 1.4;
+  line-height: 1.45;
   font-weight: 400;
-  color: var(--text);
-  background: var(--bg);
+  color: #f2f4f8;
+  background: #0a0c10;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -43,10 +26,7 @@ body,
 
 body {
   min-height: 100dvh;
-  background:
-    radial-gradient(1200px 600px at 10% -10%, rgba(61, 220, 151, 0.12), transparent 55%),
-    radial-gradient(900px 500px at 100% 0%, rgba(80, 140, 255, 0.12), transparent 50%),
-    var(--bg);
+  background: #0a0c10;
 }
 
 button,
@@ -54,14 +34,4 @@ input,
 select,
 textarea {
   font: inherit;
-  color: inherit;
-}
-
-button {
-  cursor: pointer;
-}
-
-button:disabled {
-  opacity: 0.4;
-  cursor: not-allowed;
 }

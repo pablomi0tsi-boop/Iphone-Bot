@@ -7,7 +7,7 @@ interface SearchBarProps {
 export function SearchBar({
   value,
   onChange,
-  placeholder = 'Szukaj modelu, np. 15 Pro',
+  placeholder = 'Szukaj modelu...',
 }: SearchBarProps) {
   return (
     <div className="search-bar">

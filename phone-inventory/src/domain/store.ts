@@ -1,12 +1,12 @@
 import { createId } from './defaults';
 import { calcProfit, dateInputToIso } from './calculations';
 import type {
-  AddModelInput,
   AddPhoneInput,
   AppState,
   HistoryEntry,
   SaleRecord,
   SellPhoneInput,
+  UpdatePhoneInput,
 } from './types';
 
 function nowIso(): string {
@@ -21,67 +21,57 @@ function pushHistory(state: AppState, entry: Omit<HistoryEntry, 'id'>): AppState
   };
 }
 
-export function addModel(state: AppState, input: AddModelInput): AppState {
-  const name = input.name.trim();
-  if (!name) {
-    throw new Error('Nazwa modelu jest wymagana.');
+function assertMoney(value: number, label: string): void {
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(`${label} musi być liczbą ≥ 0.`);
   }
-  const exists = state.models.some(
-    (model) => model.name.toLowerCase() === name.toLowerCase(),
-  );
-  if (exists) {
-    throw new Error('Taki model już istnieje.');
+}
+
+function assertBattery(value: number): void {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new Error('Kondycja baterii musi być w zakresie 0–100%.');
   }
-  return {
-    ...state,
-    models: [
-      ...state.models,
-      { id: createId(), name, createdAt: nowIso() },
-    ],
-  };
 }
 
 export function addPhone(state: AppState, input: AddPhoneInput): AppState {
-  if (!Number.isFinite(input.purchasePrice) || input.purchasePrice < 0) {
-    throw new Error('Cena zakupu musi być liczbą ≥ 0.');
-  }
-  const model = state.models.find((item) => item.id === input.modelId);
-  if (!model) {
-    throw new Error('Nie znaleziono modelu.');
-  }
+  assertMoney(input.purchasePrice, 'Cena zakupu');
+  assertMoney(input.listedValue, 'Cena sprzedaży / wartość');
+  assertBattery(input.batteryPercent);
 
+  const model = state.models.find((item) => item.id === input.modelId);
+  if (!model) throw new Error('Nie znaleziono modelu.');
+
+  const storage = input.storage.trim();
+  const imei = input.imei.trim();
+  if (!storage) throw new Error('Pamięć jest wymagana.');
+  if (!imei) throw new Error('IMEI jest wymagane.');
+
+  const createdAt = nowIso();
   const phone = {
     id: createId(),
     modelId: input.modelId,
-    purchasePrice: input.purchasePrice,
-    storage: input.storage?.trim() || undefined,
-    imei: input.imei?.trim() || undefined,
+    storage,
+    imei,
+    batteryPercent: Math.round(input.batteryPercent),
     condition: input.condition,
     note: input.note?.trim() || undefined,
-    createdAt: nowIso(),
+    purchasePrice: input.purchasePrice,
+    listedValue: input.listedValue,
+    createdAt,
+    updatedAt: createdAt,
   };
 
-  let next: AppState = {
+  const next: AppState = {
     ...state,
     phones: [...state.phones, phone],
   };
 
-  const deduct = input.deductFromCash !== false;
-  if (deduct) {
-    next = {
-      ...next,
-      finance: {
-        ...next.finance,
-        cash: next.finance.cash - input.purchasePrice,
-      },
-    };
-  }
-
   return pushHistory(next, {
     type: 'purchase',
-    date: phone.createdAt,
+    date: createdAt,
     modelName: model.name,
     purchasePrice: phone.purchasePrice,
+    salePrice: phone.listedValue,
     storage: phone.storage,
     imei: phone.imei,
     note: phone.note,
@@ -89,79 +79,85 @@ export function addPhone(state: AppState, input: AddPhoneInput): AppState {
   });
 }
 
-/** Quick +1: add a phone with given purchase price (model already known). */
-export function incrementStock(
-  state: AppState,
-  modelId: string,
-  purchasePrice: number,
-): AppState {
-  return addPhone(state, {
-    modelId,
-    purchasePrice,
-    condition: 'dobry',
-    deductFromCash: true,
-  });
+export function updatePhone(state: AppState, input: UpdatePhoneInput): AppState {
+  assertMoney(input.purchasePrice, 'Cena zakupu');
+  assertMoney(input.listedValue, 'Cena sprzedaży / wartość');
+  assertBattery(input.batteryPercent);
+
+  const index = state.phones.findIndex((item) => item.id === input.phoneId);
+  if (index < 0) throw new Error('Nie znaleziono telefonu.');
+
+  const existing = state.phones[index];
+  const model = state.models.find((item) => item.id === existing.modelId);
+  const storage = input.storage.trim();
+  const imei = input.imei.trim();
+  if (!storage) throw new Error('Pamięć jest wymagana.');
+  if (!imei) throw new Error('IMEI jest wymagane.');
+
+  const updated = {
+    ...existing,
+    storage,
+    imei,
+    batteryPercent: Math.round(input.batteryPercent),
+    condition: input.condition,
+    note: input.note?.trim() || undefined,
+    purchasePrice: input.purchasePrice,
+    listedValue: input.listedValue,
+    updatedAt: nowIso(),
+  };
+
+  const phones = [...state.phones];
+  phones[index] = updated;
+
+  return pushHistory(
+    { ...state, phones },
+    {
+      type: 'update',
+      date: updated.updatedAt,
+      modelName: model?.name ?? 'Nieznany model',
+      purchasePrice: updated.purchasePrice,
+      salePrice: updated.listedValue,
+      storage: updated.storage,
+      imei: updated.imei,
+      note: updated.note,
+      phoneId: updated.id,
+    },
+  );
 }
 
-/**
- * Quick -1: remove the newest phone of that model (not a sale).
- * Refunds purchase price to cash.
- */
-export function decrementStock(state: AppState, modelId: string): AppState {
-  const model = state.models.find((item) => item.id === modelId);
-  if (!model) {
-    throw new Error('Nie znaleziono modelu.');
-  }
+export function removePhone(state: AppState, phoneId: string): AppState {
+  const phone = state.phones.find((item) => item.id === phoneId);
+  if (!phone) throw new Error('Nie znaleziono telefonu.');
+  const model = state.models.find((item) => item.id === phone.modelId);
 
-  const phones = state.phones
-    .filter((phone) => phone.modelId === modelId)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-  if (phones.length === 0) {
-    throw new Error('Brak telefonów tego modelu w magazynie.');
-  }
-
-  const removed = phones[0];
   const next: AppState = {
     ...state,
-    phones: state.phones.filter((phone) => phone.id !== removed.id),
-    finance: {
-      ...state.finance,
-      cash: state.finance.cash + removed.purchasePrice,
-    },
+    phones: state.phones.filter((item) => item.id !== phoneId),
   };
 
   return pushHistory(next, {
     type: 'remove',
     date: nowIso(),
-    modelName: model.name,
-    purchasePrice: removed.purchasePrice,
-    storage: removed.storage,
-    imei: removed.imei,
-    note: 'Usunięto ze stanu (−)',
-    phoneId: removed.id,
+    modelName: model?.name ?? 'Nieznany model',
+    purchasePrice: phone.purchasePrice,
+    salePrice: phone.listedValue,
+    storage: phone.storage,
+    imei: phone.imei,
+    note: 'Usunięto z magazynu',
+    phoneId: phone.id,
   });
 }
 
 export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
-  if (!Number.isFinite(input.salePrice) || input.salePrice < 0) {
-    throw new Error('Cena sprzedaży musi być liczbą ≥ 0.');
-  }
-  if (!input.soldAt?.trim()) {
-    throw new Error('Data sprzedaży jest wymagana.');
-  }
+  assertMoney(input.salePrice, 'Cena sprzedaży');
+  if (!input.soldAt?.trim()) throw new Error('Data sprzedaży jest wymagana.');
 
   const phone = state.phones.find((item) => item.id === input.phoneId);
-  if (!phone) {
-    throw new Error('Nie znaleziono telefonu w magazynie.');
-  }
+  if (!phone) throw new Error('Nie znaleziono telefonu w magazynie.');
 
   const model = state.models.find((item) => item.id === phone.modelId);
   const modelName = model?.name ?? 'Nieznany model';
-  const storage = (input.storage ?? phone.storage)?.trim() || undefined;
-  const imei = (input.imei ?? phone.imei)?.trim() || undefined;
   const profit = calcProfit(input.salePrice, phone.purchasePrice);
-  const depositTo = input.depositTo ?? 'cash';
   const soldAt = dateInputToIso(input.soldAt.trim());
 
   const sale: SaleRecord = {
@@ -169,22 +165,18 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     phoneId: phone.id,
     modelId: phone.modelId,
     modelName,
-    storage,
-    imei,
+    storage: phone.storage,
+    imei: phone.imei,
     purchasePrice: phone.purchasePrice,
     salePrice: input.salePrice,
     profit,
     soldAt,
   };
 
-  const finance = { ...state.finance };
-  finance[depositTo] = finance[depositTo] + input.salePrice;
-
   const next: AppState = {
     ...state,
     phones: state.phones.filter((item) => item.id !== phone.id),
     sales: [sale, ...state.sales],
-    finance,
   };
 
   return pushHistory(next, {
@@ -194,40 +186,8 @@ export function sellPhone(state: AppState, input: SellPhoneInput): AppState {
     purchasePrice: phone.purchasePrice,
     salePrice: input.salePrice,
     profit,
-    storage,
-    imei,
+    storage: phone.storage,
+    imei: phone.imei,
     phoneId: phone.id,
-  });
-}
-
-export function setCash(state: AppState, cash: number): AppState {
-  if (!Number.isFinite(cash)) {
-    throw new Error('Gotówka musi być liczbą.');
-  }
-  const next: AppState = {
-    ...state,
-    finance: { ...state.finance, cash },
-  };
-  return pushHistory(next, {
-    type: 'finance',
-    date: nowIso(),
-    modelName: 'Gotówka',
-    note: `Ustawiono gotówkę: ${cash} zł`,
-  });
-}
-
-export function setBank(state: AppState, bank: number): AppState {
-  if (!Number.isFinite(bank)) {
-    throw new Error('Stan konta musi być liczbą.');
-  }
-  const next: AppState = {
-    ...state,
-    finance: { ...state.finance, bank },
-  };
-  return pushHistory(next, {
-    type: 'finance',
-    date: nowIso(),
-    modelName: 'Konto',
-    note: `Ustawiono konto: ${bank} zł`,
   });
 }

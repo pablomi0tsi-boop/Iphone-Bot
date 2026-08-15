@@ -1,6 +1,5 @@
 import type {
   AppState,
-  FinanceSummary,
   ModelStockSummary,
   MonthlyProfitSummary,
   Phone,
@@ -22,32 +21,30 @@ const MONTHS_PL = [
   'Grudzień',
 ] as const;
 
-export function sumPurchasePrices(phones: Phone[]): number {
-  return phones.reduce((sum, phone) => sum + phone.purchasePrice, 0);
+export function phoneStockValue(phone: Phone): number {
+  return Number.isFinite(phone.listedValue) ? phone.listedValue : 0;
 }
 
-export function averagePurchasePrice(phones: Phone[]): number {
-  if (phones.length === 0) return 0;
-  return sumPurchasePrices(phones) / phones.length;
+export function sumStockValue(phones: Phone[]): number {
+  return phones.reduce((sum, phone) => sum + phoneStockValue(phone), 0);
 }
 
 export function getPhonesForModel(state: AppState, modelId: string): Phone[] {
-  return state.phones.filter((phone) => phone.modelId === modelId);
+  return state.phones
+    .filter((phone) => phone.modelId === modelId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 export function getModelStockSummaries(state: AppState): ModelStockSummary[] {
-  return state.models
-    .map((model) => {
-      const phones = getPhonesForModel(state, model.id);
-      return {
-        model,
-        quantity: phones.length,
-        averagePurchasePrice: averagePurchasePrice(phones),
-        stockValue: sumPurchasePrices(phones),
-        phones,
-      };
-    })
-    .sort((a, b) => a.model.name.localeCompare(b.model.name, 'pl'));
+  return state.models.map((model) => {
+    const phones = getPhonesForModel(state, model.id);
+    return {
+      model,
+      quantity: phones.length,
+      stockValue: sumStockValue(phones),
+      phones,
+    };
+  });
 }
 
 export function filterModelSummaries(
@@ -61,24 +58,18 @@ export function filterModelSummaries(
   );
 }
 
-export function getPhoneValue(state: AppState): number {
-  return sumPurchasePrices(state.phones);
+export function getWarehouseTotals(state: AppState): {
+  phoneCount: number;
+  stockValue: number;
+} {
+  return {
+    phoneCount: state.phones.length,
+    stockValue: sumStockValue(state.phones),
+  };
 }
 
 export function getTotalProfit(state: AppState): number {
   return state.sales.reduce((sum, sale) => sum + sale.profit, 0);
-}
-
-export function getFinanceSummary(state: AppState): FinanceSummary {
-  const phoneValue = getPhoneValue(state);
-  const totalProfit = getTotalProfit(state);
-  return {
-    cash: state.finance.cash,
-    bank: state.finance.bank,
-    phoneValue,
-    totalAssets: state.finance.cash + state.finance.bank + phoneValue,
-    totalProfit,
-  };
 }
 
 export function calcProfit(salePrice: number, purchasePrice: number): number {
@@ -111,7 +102,6 @@ export function formatDateOnly(iso: string): string {
   }).format(new Date(iso));
 }
 
-/** Local calendar YYYY-MM for a sale timestamp. */
 export function getYearMonth(isoOrDate: string): string {
   const date = new Date(isoOrDate);
   const year = date.getFullYear();
@@ -120,13 +110,13 @@ export function getYearMonth(isoOrDate: string): string {
 }
 
 export function currentYearMonth(now = new Date()): string {
-  return getYearMonth(now.toISOString());
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export function shiftYearMonth(yearMonth: string, delta: number): string {
   const [yearRaw, monthRaw] = yearMonth.split('-').map(Number);
   const date = new Date(yearRaw, monthRaw - 1 + delta, 1);
-  return getYearMonth(date.toISOString());
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}`;
 }
 
 export function formatMonthLabel(yearMonth: string, uppercase = true): string {
@@ -140,10 +130,6 @@ export function shortMonthLabel(yearMonth: string): string {
   return formatMonthLabel(yearMonth, false);
 }
 
-/**
- * Convert `<input type="date">` value (YYYY-MM-DD) to a stable ISO timestamp
- * at local noon so the calendar day is preserved across timezones.
- */
 export function dateInputToIso(dateInput: string): string {
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateInput)) {
     const [year, month, day] = dateInput.split('-').map(Number);
@@ -181,4 +167,29 @@ export function getMonthlyProfit(
 export function listSaleYearMonths(sales: SaleRecord[]): string[] {
   const keys = new Set(sales.map((sale) => getYearMonth(sale.soldAt)));
   return [...keys].sort();
+}
+
+export function conditionLabel(value: string): string {
+  switch (value) {
+    case 'idealny':
+      return 'Idealny';
+    case 'bardzo_dobry':
+      return 'Bardzo dobry';
+    case 'dobry':
+      return 'Dobry';
+    case 'uzywany':
+      return 'Używany';
+    case 'uszkodzony':
+      return 'Uszkodzony';
+    case 'nowy':
+      return 'Idealny';
+    case 'zadrapania':
+      return 'Używany';
+    default:
+      return value;
+  }
+}
+
+export function unitLabel(index: number): string {
+  return `#${index + 1}`;
 }

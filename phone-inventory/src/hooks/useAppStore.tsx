@@ -11,15 +11,15 @@ import {
 import { createInitialState } from '../domain/defaults';
 import {
   filterModelSummaries,
-  getFinanceSummary,
   getModelStockSummaries,
+  getWarehouseTotals,
 } from '../domain/calculations';
 import * as ops from '../domain/store';
 import type {
-  AddModelInput,
   AddPhoneInput,
   AppState,
   SellPhoneInput,
+  UpdatePhoneInput,
 } from '../domain/types';
 import { createDefaultRepository, type InventoryRepository } from '../storage';
 
@@ -30,14 +30,11 @@ interface AppStoreValue {
   setSearch: (value: string) => void;
   summaries: ReturnType<typeof getModelStockSummaries>;
   filteredSummaries: ReturnType<typeof getModelStockSummaries>;
-  finance: ReturnType<typeof getFinanceSummary>;
-  addModel: (input: AddModelInput) => void;
+  totals: ReturnType<typeof getWarehouseTotals>;
   addPhone: (input: AddPhoneInput) => void;
-  incrementStock: (modelId: string, purchasePrice: number) => void;
-  decrementStock: (modelId: string) => void;
+  updatePhone: (input: UpdatePhoneInput) => void;
+  removePhone: (phoneId: string) => void;
   sellPhone: (input: SellPhoneInput) => void;
-  setCash: (cash: number) => void;
-  setBank: (bank: number) => void;
   error: string | null;
   clearError: () => void;
 }
@@ -51,8 +48,6 @@ export function AppStoreProvider({
   children: ReactNode;
   repository?: InventoryRepository;
 }) {
-  // Stabilize repository identity — default-arg `createDefaultRepository()` would
-  // allocate a new instance every render and re-trigger the load effect forever.
   const repositoryRef = useRef<InventoryRepository | null>(null);
   if (repositoryRef.current === null) {
     repositoryRef.current = repository ?? createDefaultRepository();
@@ -108,7 +103,7 @@ export function AppStoreProvider({
     () => filterModelSummaries(summaries, search),
     [summaries, search],
   );
-  const finance = useMemo(() => getFinanceSummary(state), [state]);
+  const totals = useMemo(() => getWarehouseTotals(state), [state]);
 
   const value: AppStoreValue = {
     ready,
@@ -117,15 +112,11 @@ export function AppStoreProvider({
     setSearch,
     summaries,
     filteredSummaries,
-    finance,
-    addModel: (input) => run((s) => ops.addModel(s, input)),
+    totals,
     addPhone: (input) => run((s) => ops.addPhone(s, input)),
-    incrementStock: (modelId, purchasePrice) =>
-      run((s) => ops.incrementStock(s, modelId, purchasePrice)),
-    decrementStock: (modelId) => run((s) => ops.decrementStock(s, modelId)),
+    updatePhone: (input) => run((s) => ops.updatePhone(s, input)),
+    removePhone: (phoneId) => run((s) => ops.removePhone(s, phoneId)),
     sellPhone: (input) => run((s) => ops.sellPhone(s, input)),
-    setCash: (cash) => run((s) => ops.setCash(s, cash)),
-    setBank: (bank) => run((s) => ops.setBank(s, bank)),
     error,
     clearError: () => setError(null),
   };
