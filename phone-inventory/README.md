@@ -29,8 +29,9 @@ npm run build
 ## Funkcje
 
 - Lista modeli z ilością, średnią ceną zakupu i wartością magazynową
-- Przyciski `−` / `+` oraz formularz „Dodaj telefon”
-- Sprzedaż z wyliczeniem zysku (`sprzedaż − zakup`)
+- Przyciski `−` / `+` oraz formularz „Dodaj telefon” (pamięć, IMEI, stan)
+- Sprzedaż z datą, pamięcią i IMEI — zysk = sprzedaż − zakup
+- Zakładka **Zysk**: miesięczny obrót i zysk z nawigacją miesięcy
 - Panel finansów: gotówka, konto, wartość telefonów, majątek, łączny zysk
 - Historia operacji (od najnowszych)
 - Wyszukiwanie modeli
