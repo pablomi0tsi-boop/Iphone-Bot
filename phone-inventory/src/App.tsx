@@ -106,21 +106,22 @@ function AppShell() {
           <span>{finance.phoneValue.toLocaleString('pl-PL')} zł</span>
           <small>wartość telefonów</small>
           {cloudAuthRequired ? (
-            <small>
-              {user?.user_metadata?.user_name ||
-                user?.email ||
-                'GitHub'}{' '}
-              ·{' '}
+            <div className="header-auth">
+              <small>
+                {user?.user_metadata?.user_name ||
+                  user?.email ||
+                  'GitHub'}
+              </small>
               <button
                 type="button"
-                className="linkish"
+                className="btn ghost"
                 onClick={() => {
                   void signOut();
                 }}
               >
                 Wyloguj
               </button>
-            </small>
+            </div>
           ) : null}
         </div>
       </header>

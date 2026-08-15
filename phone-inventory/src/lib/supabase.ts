@@ -203,14 +203,10 @@ export type Database = {
   };
 };
 
-/** Prefer VITE_SUPABASE_ANON_KEY; keep PUBLISHABLE_KEY as alias for older deploys. */
+/** Env: VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY only (no secrets in frontend). */
 export function getSupabaseAnonKey(): string | undefined {
   const anon = import.meta.env.VITE_SUPABASE_ANON_KEY;
-  const publishable = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
-  const key = (typeof anon === 'string' && anon.trim() ? anon : publishable) as
-    | string
-    | undefined;
-  return key?.trim() || undefined;
+  return typeof anon === 'string' && anon.trim() ? anon.trim() : undefined;
 }
 
 export function getSupabaseUrl(): string | undefined {
@@ -224,13 +220,6 @@ export function isSupabaseConfigured(): boolean {
   return Boolean(url && key && !url.includes('YOUR_PROJECT'));
 }
 
-/** Where Supabase should send the user after GitHub OAuth completes. */
-export function getOAuthRedirectTo(): string {
-  if (typeof window === 'undefined') return '';
-  // Root of the SPA — Vercel rewrites all paths to index.html.
-  return `${window.location.origin}/`;
-}
-
 let client: SupabaseClient<Database> | null = null;
 
 export function createSupabaseClient(): SupabaseClient<Database> {
@@ -240,7 +229,7 @@ export function createSupabaseClient(): SupabaseClient<Database> {
   const key = getSupabaseAnonKey();
   if (!url || !key) {
     throw new Error(
-      'Brak VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Skopiuj .env.example → .env.',
+      'Brak VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Ustaw zmienne środowiskowe.',
     );
   }
 
@@ -248,7 +237,8 @@ export function createSupabaseClient(): SupabaseClient<Database> {
     auth: {
       persistSession: true,
       autoRefreshToken: true,
-      // Required to exchange ?code= from OAuth redirect into a session.
+      storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+      // Exchange OAuth ?code= into a persisted session (PKCE).
       detectSessionInUrl: true,
       flowType: 'pkce',
     },
@@ -261,8 +251,8 @@ export function getSupabaseClient(): SupabaseClient<Database> {
 }
 
 /**
- * Ensure there is a logged-in Supabase session (GitHub OAuth).
- * Does not use anonymous auth or service_role.
+ * Require a logged-in GitHub OAuth session.
+ * Never uses anonymous auth or service_role.
  */
 export async function ensureSupabaseAuth(
   supabase: SupabaseClient<Database> = createSupabaseClient(),
@@ -279,12 +269,10 @@ export async function ensureSupabaseAuth(
 
 export async function signInWithGitHub(): Promise<void> {
   const supabase = createSupabaseClient();
-  const redirectTo = getOAuthRedirectTo();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
     options: {
-      redirectTo,
-      skipBrowserRedirect: false,
+      redirectTo: window.location.origin,
     },
   });
   if (error) {

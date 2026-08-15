@@ -5,7 +5,7 @@ interface LoginScreenProps {
   onClearError?: () => void;
 }
 
-/** Minimal gate — reuses existing loading / button styles; no warehouse redesign. */
+/** Login gate only — warehouse UI unchanged. */
 export function LoginScreen({
   error,
   busy = false,
@@ -16,7 +16,7 @@ export function LoginScreen({
     <div className="app-shell">
       <header className="app-header">
         <div>
-          <p className="eyebrow">Phone Inventory</p>
+          <p className="eyebrow">SmartFix</p>
           <h1>Logowanie</h1>
         </div>
       </header>
@@ -35,8 +35,7 @@ export function LoginScreen({
       <main className="app-main">
         <section className="finance-card" style={{ padding: 20 }}>
           <p className="finance-hint" style={{ marginTop: 0 }}>
-            Zaloguj się kontem GitHub, aby korzystać ze wspólnego magazynu
-            (Supabase).
+            Zaloguj się przez GitHub, aby otworzyć magazyn SmartFix.
           </p>
           <button
             type="button"

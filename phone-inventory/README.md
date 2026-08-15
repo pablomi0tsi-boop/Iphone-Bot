@@ -1,14 +1,13 @@
-# Magazyn telefonów
+# Magazyn telefonów (SmartFix)
 
 Prosta, mobilna aplikacja do zarządzania magazynem konkretnych iPhone’ów.
 
 ## Stack
 
 - React 19 + TypeScript + Vite
-- Persystencja: **Supabase** (główne źródło danych) przez `InventoryRepository`
-- Auth: **GitHub OAuth** (Supabase Auth) — bez `service_role` na froncie
+- Persystencja: **Supabase** przez `InventoryRepository`
+- Auth: **GitHub OAuth** (Supabase Auth) — tylko `VITE_SUPABASE_ANON_KEY` na froncie
 - Fallback: `localStorage` gdy brak zmiennych środowiskowych (lokalne / e2e)
-- Cennik wariantów pamięci w `src/domain/catalog.ts`
 
 ## Uruchomienie
 
@@ -24,34 +23,31 @@ Aplikacja: http://localhost:5173
 
 ### Supabase + GitHub OAuth
 
-1. SQL Editor → wklej `supabase/migrations/20260815120000_phone_inventory.sql`
-   (`phones`, `sales`, `finance`, `history` + RLS tylko dla `authenticated`).
-2. **Authentication → Providers → GitHub**: włącz, wklej Client ID + Secret z GitHub OAuth App.
-3. W GitHub OAuth App ustaw **Authorization callback URL** dokładnie na:
-   `https://<PROJECT_REF>.supabase.co/auth/v1/callback`  
-   (to musi być URL Supabase, **nie** Vercel — zły callback kończy się na
-   `github.com/sessions/verified-device`).
-4. **Authentication → URL Configuration**:
-   - Site URL: `https://phone-inventory-swart.vercel.app`
-   - Redirect URLs:
-     - `http://localhost:5173/`
-     - `https://phone-inventory-swart.vercel.app/`
-5. Env (lokalnie + Vercel):
-   - `VITE_SUPABASE_URL`
-   - `VITE_SUPABASE_ANON_KEY`  
-     (alias: `VITE_SUPABASE_PUBLISHABLE_KEY` też działa)
+1. SQL: `supabase/migrations/20260815120000_phone_inventory.sql`
+2. Provider GitHub włączony w Supabase (Client ID/Secret tylko w dashboardzie).
+3. GitHub OAuth App callback:
+   `https://<PROJECT_REF>.supabase.co/auth/v1/callback`
+4. Redirect URLs w Supabase:
+   - `http://localhost:5173`
+   - `https://phone-inventory-swart.vercel.app`
+5. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
 
-Aplikacja woła `signInWithOAuth({ provider: 'github', redirectTo: origin + '/' })`,
-potem `detectSessionInUrl` + PKCE zapisuje sesję po powrocie.
+Logowanie:
 
-Bez env → `localStorage` (bez ekranu logowania).
+```ts
+supabase.auth.signInWithOAuth({
+  provider: 'github',
+  options: { redirectTo: window.location.origin },
+})
+```
+
+Sesja PKCE jest zapamiętywana; po powrocie z GitHuba użytkownik trafia do magazynu.
 
 ## Wdrożenie na Vercel
 
-1. Root Directory: `phone-inventory`.
-2. Build: `npm run build` → `dist`.
-3. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`.
-4. Po deployu dodaj produkcyjny URL do Supabase Redirect URLs.
+1. Root Directory: `phone-inventory`
+2. Env: `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`
+3. Po zmianach kodu auth — **nowy deploy** (Vite wbudowuje env w build)
 
 ## Testy
 
@@ -60,13 +56,3 @@ npm test
 npm run test:e2e
 npm run build
 ```
-
-## Funkcje
-
-- Logowanie GitHub (gdy Supabase skonfigurowany)
-- Lista modeli z liczbą sztuk
-- Każdy telefon to osobny rekord (IMEI, pamięć, bateria, stan, ceny)
-- Formularz „DODAJ TELEFON” / sprzedaż bez zmian
-- Zakładka **Zysk**: miesięczny obrót i zysk
-- Sprzedany telefon zostaje w bazie ze statusem `sold`
-- Dane wspólne przez Supabase
