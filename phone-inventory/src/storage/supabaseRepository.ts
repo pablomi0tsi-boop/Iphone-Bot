@@ -133,6 +133,48 @@ function historyToRow(entry: HistoryEntry): Omit<HistoryRow, 'created_at'> {
   };
 }
 
+/** Minimal sold-phone row from a sale snapshot (when unit left in-stock state). */
+function soldPhoneFromSale(sale: SaleRecord, updatedAt: string): PhoneRow {
+  return {
+    id: sale.phoneId,
+    model_id: sale.modelId,
+    model_name: sale.modelName,
+    storage: sale.storage ?? '128 GB',
+    imei: sale.imei ?? '',
+    battery_percent: 100,
+    condition: 'dobry',
+    note: null,
+    purchase_price: sale.purchasePrice,
+    listed_value: sale.salePrice,
+    status: 'sold',
+    created_at: sale.soldAt,
+    updated_at: updatedAt,
+  };
+}
+
+/** Minimal removed-phone row from a history snapshot. */
+function removedPhoneFromHistory(
+  entry: HistoryEntry,
+  updatedAt: string,
+): PhoneRow | null {
+  if (!entry.phoneId) return null;
+  return {
+    id: entry.phoneId,
+    model_id: 'unknown',
+    model_name: entry.modelName || 'Nieznany model',
+    storage: entry.storage ?? '128 GB',
+    imei: entry.imei ?? '',
+    battery_percent: 100,
+    condition: 'dobry',
+    note: entry.note ?? null,
+    purchase_price: entry.purchasePrice ?? 0,
+    listed_value: entry.salePrice ?? entry.purchasePrice ?? 0,
+    status: 'removed',
+    created_at: entry.date,
+    updated_at: updatedAt,
+  };
+}
+
 function assertOk(label: string, error: { message: string } | null): void {
   if (error) {
     throw new Error(`Supabase ${label}: ${error.message}`);
@@ -216,19 +258,24 @@ export class SupabaseInventoryRepository implements InventoryRepository {
     const modelNameById = new Map(state.models.map((m) => [m.id, m.name]));
     const nextIds = new Set(state.phones.map((p) => p.id));
     const soldPhoneIds = new Set(state.sales.map((s) => s.phoneId));
+    const now = new Date().toISOString();
 
-    const toUpsert = state.phones.map((phone) =>
+    // IDs known to exist in public.phones after the phone writes below.
+    const ensuredPhoneIds = new Set<string>();
+
+    // --- 1) In-stock phones first (purchase / update keep the unit here) ---
+    const inStockRows = state.phones.map((phone) =>
       phoneToRow(phone, modelNameById.get(phone.modelId) ?? phone.modelId),
     );
-
-    if (toUpsert.length > 0) {
-      const { error } = await supabase.from('phones').upsert(toUpsert, {
+    if (inStockRows.length > 0) {
+      const { error } = await supabase.from('phones').upsert(inStockRows, {
         onConflict: 'id',
       });
       assertOk('phones upsert', error);
+      for (const row of inStockRows) ensuredPhoneIds.add(row.id);
     }
 
-    // Phones that left the in-stock list: sold if a sale exists, otherwise removed.
+    // --- 2) Units that left stock: ensure row exists, then set status ---
     const missingRemote = remote.phones.filter((p) => !nextIds.has(p.id));
     const toSold = missingRemote
       .filter((p) => soldPhoneIds.has(p.id))
@@ -237,7 +284,24 @@ export class SupabaseInventoryRepository implements InventoryRepository {
       .filter((p) => !soldPhoneIds.has(p.id))
       .map((p) => p.id);
 
-    const now = new Date().toISOString();
+    // Sales whose phone is not in-stock in app state (and maybe not remote yet).
+    const soldRowsNeeded: PhoneRow[] = [];
+    for (const sale of state.sales) {
+      if (nextIds.has(sale.phoneId) || ensuredPhoneIds.has(sale.phoneId)) continue;
+      if (toSold.includes(sale.phoneId)) {
+        ensuredPhoneIds.add(sale.phoneId);
+        continue;
+      }
+      // Phone never written as in_stock on this save (e.g. add+sell, or local migrate).
+      soldRowsNeeded.push(soldPhoneFromSale(sale, now));
+      ensuredPhoneIds.add(sale.phoneId);
+    }
+    if (soldRowsNeeded.length > 0) {
+      const { error } = await supabase.from('phones').upsert(soldRowsNeeded, {
+        onConflict: 'id',
+      });
+      assertOk('phones upsert sold', error);
+    }
 
     if (toSold.length > 0) {
       const { error } = await supabase
@@ -245,16 +309,38 @@ export class SupabaseInventoryRepository implements InventoryRepository {
         .update({ status: 'sold', updated_at: now })
         .in('id', toSold);
       assertOk('phones mark sold', error);
+      for (const id of toSold) ensuredPhoneIds.add(id);
     }
 
+    // Removals: remote in-stock units that disappeared without a sale.
     if (toRemoved.length > 0) {
       const { error } = await supabase
         .from('phones')
         .update({ status: 'removed', updated_at: now })
         .in('id', toRemoved);
       assertOk('phones mark removed', error);
+      for (const id of toRemoved) ensuredPhoneIds.add(id);
     }
 
+    // History-only removals (e.g. localStorage migrate) — phone not in remote/state/sales.
+    const removedRowsNeeded: PhoneRow[] = [];
+    for (const entry of state.history) {
+      if (entry.type !== 'remove' || !entry.phoneId) continue;
+      if (ensuredPhoneIds.has(entry.phoneId) || nextIds.has(entry.phoneId)) continue;
+      if (soldPhoneIds.has(entry.phoneId)) continue;
+      const row = removedPhoneFromHistory(entry, now);
+      if (!row) continue;
+      removedRowsNeeded.push(row);
+      ensuredPhoneIds.add(entry.phoneId);
+    }
+    if (removedRowsNeeded.length > 0) {
+      const { error } = await supabase.from('phones').upsert(removedRowsNeeded, {
+        onConflict: 'id',
+      });
+      assertOk('phones upsert removed', error);
+    }
+
+    // --- 3) Sales (FK → phones) ---
     const remoteSaleIds = new Set(remote.sales.map((s) => s.id));
     const newSales = state.sales
       .filter((s) => !remoteSaleIds.has(s.id))
@@ -266,6 +352,7 @@ export class SupabaseInventoryRepository implements InventoryRepository {
       assertOk('sales upsert', error);
     }
 
+    // --- 4) Finance ---
     const { error: financeError } = await supabase.from('finance').upsert(
       {
         id: 1,
@@ -277,10 +364,18 @@ export class SupabaseInventoryRepository implements InventoryRepository {
     );
     assertOk('finance upsert', financeError);
 
+    // --- 5) History last; phone_id only when phones.id is guaranteed ---
     const remoteHistoryIds = new Set(remote.history.map((h) => h.id));
     const newHistory = state.history
       .filter((h) => !remoteHistoryIds.has(h.id))
-      .map(historyToRow);
+      .map((entry) => {
+        const row = historyToRow(entry);
+        if (row.phone_id && !ensuredPhoneIds.has(row.phone_id)) {
+          // No matching phones row (finance-only / orphan) — allowed NULL.
+          return { ...row, phone_id: null };
+        }
+        return row;
+      });
     if (newHistory.length > 0) {
       const { error } = await supabase.from('history').upsert(newHistory, {
         onConflict: 'id',
