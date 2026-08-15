@@ -18,6 +18,13 @@ npm run dev
 
 Aplikacja: http://localhost:5173
 
+## Wdrożenie na Vercel
+
+1. W ustawieniach projektu Vercel ustaw **Root Directory** na `phone-inventory`.
+2. Framework Preset: Vite (lub wykryje `vercel.json`).
+3. Build: `npm run build` → output `dist` (ustawione w `vercel.json`).
+4. `PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1` w `installCommand` pomija zbędne pobieranie przeglądarek E2E przy deployu.
+
 ## Testy
 
 ```bash
