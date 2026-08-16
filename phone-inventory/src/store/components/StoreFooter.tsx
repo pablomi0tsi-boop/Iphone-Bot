@@ -21,6 +21,9 @@ export function StoreFooter() {
               <Link to="/iphone">Popularne modele</Link>
             </li>
             <li>
+              <Link to="/sprzedaj">Sprzedaż iPhone&apos;a</Link>
+            </li>
+            <li>
               <Link to="/o-nas">O nas</Link>
             </li>
           </ul>

@@ -59,9 +59,9 @@ export function HomePage() {
             <Link to="/sklep" className="btn primary">
               Zobacz iPhone&apos;y
             </Link>
-            <a href="#jak-dzialamy" className="btn ghost">
-              Jak działamy?
-            </a>
+            <Link to="/sprzedaj" className="btn ghost">
+              Sprzedaj iPhone&apos;a
+            </Link>
           </div>
         </div>
       </section>

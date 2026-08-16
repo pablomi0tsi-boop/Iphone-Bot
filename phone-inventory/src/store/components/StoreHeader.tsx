@@ -4,8 +4,9 @@ import { useAuth } from '../../hooks/useAuth';
 import { useCart } from '../CartContext';
 
 const NAV = [
-  { to: '/sklep', label: "Sklep", end: false },
+  { to: '/sklep', label: 'Sklep', end: false },
   { to: '/iphone', label: "iPhone'y", end: false },
+  { to: '/sprzedaj', label: "Sprzedaż iPhone'a", end: false },
   { to: '/o-nas', label: 'O nas', end: false },
   { to: '/kontakt', label: 'Kontakt', end: false },
 ] as const;

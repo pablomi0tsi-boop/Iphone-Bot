@@ -1,0 +1,801 @@
+/* Sell-your-iPhone — SmartFix dark + green */
+
+.sell-page {
+  padding-bottom: 4rem;
+}
+
+.sell-page .sf-muted {
+  color: var(--text-muted);
+}
+
+.sell-kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+/* —— Hero —— */
+
+.sell-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 3.5rem 1.25rem 3rem;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(ellipse 70% 80% at 15% 0%, rgba(61, 220, 151, 0.14), transparent 55%),
+    radial-gradient(ellipse 50% 60% at 90% 20%, rgba(61, 220, 151, 0.06), transparent 50%),
+    linear-gradient(180deg, #0a0f0c 0%, var(--bg) 100%);
+}
+
+.sell-hero__glow {
+  pointer-events: none;
+  position: absolute;
+  inset: auto -20% -40% 40%;
+  height: 60%;
+  background: radial-gradient(circle, rgba(61, 220, 151, 0.12), transparent 65%);
+}
+
+.sell-hero__inner {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.sell-hero h1 {
+  margin: 0 0 0.75rem;
+  font-family: 'Syne', 'DM Sans', sans-serif;
+  font-size: clamp(1.85rem, 4.5vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.sell-hero__lead {
+  margin: 0 auto 1.5rem;
+  max-width: 36rem;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.sell-benefits {
+  list-style: none;
+  margin: 0 auto 1.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+  max-width: 28rem;
+  text-align: left;
+}
+
+.sell-benefits li {
+  position: relative;
+  padding-left: 1.6rem;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.sell-benefits li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.sell-page__body {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 1rem;
+  scroll-margin-top: 5rem;
+}
+
+.sell-page .btn {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: transform 0.12s ease, background 0.12s ease, filter 0.12s ease;
+  cursor: pointer;
+  font: inherit;
+}
+
+.sell-page .btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.sell-page .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sell-page .btn.primary {
+  background: var(--accent);
+  color: #04140d;
+}
+
+.sell-page .btn.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.sell-page .btn.ghost {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.sell-page .btn.lg {
+  padding: 0.9rem 1.6rem;
+  font-size: 1rem;
+}
+
+/* —— Wizard panel —— */
+
+.sell-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 1.5rem 1.35rem 1.35rem;
+  box-shadow: var(--shadow);
+}
+
+@media (min-width: 768px) {
+  .sell-panel {
+    padding: 2rem 2.25rem 1.75rem;
+  }
+}
+
+.sell-progress {
+  margin-bottom: 1.5rem;
+}
+
+.sell-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.sell-progress-meta span:last-child {
+  color: var(--accent);
+}
+
+.sell-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.sell-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1faa6c, var(--accent));
+  transition: width 0.35s ease;
+}
+
+.sell-step {
+  animation: sell-step-in 0.32s ease;
+}
+
+.sell-step h2 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.25rem, 2.5vw, 1.55rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.sell-step > .sf-muted {
+  margin: 0 0 1.35rem;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+@keyframes sell-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.sell-error {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  background: var(--danger-dim);
+  border: 1px solid rgba(255, 107, 122, 0.35);
+  color: #ffb0b8;
+  font-size: 0.88rem;
+}
+
+.sell-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.35rem;
+}
+
+.sell-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+/* —— Model grid —— */
+
+.sell-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+@media (min-width: 560px) {
+  .sell-model-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 840px) {
+  .sell-model-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.sell-model-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 0.65rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.sell-model-card img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35));
+}
+
+.sell-model-fallback {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.sell-model-card:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+  background: rgba(61, 220, 151, 0.06);
+}
+
+.sell-model-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 220, 151, 0.25);
+}
+
+/* —— Choice / condition cards —— */
+
+.sell-choice-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+@media (min-width: 560px) {
+  .sell-choice-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.sell-choice {
+  padding: 1rem 0.85rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sell-choice:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+}
+
+.sell-choice.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+}
+
+.sell-condition-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.7rem;
+}
+
+@media (min-width: 640px) {
+  .sell-condition-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.sell-condition-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  text-align: left;
+  padding: 1.15rem 1.15rem;
+  min-height: 5rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.sell-condition-card strong {
+  font-size: 1rem;
+}
+
+.sell-condition-card span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.sell-condition-card:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+  background: rgba(61, 220, 151, 0.06);
+}
+
+.sell-condition-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 220, 151, 0.25);
+}
+
+/* —— Technical —— */
+
+.sell-tech-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.sell-tech-q {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sell-tech-q legend {
+  margin-bottom: 0.5rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: var(--text);
+  padding: 0;
+}
+
+.sell-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.sell-seg button {
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.sell-seg button:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+}
+
+.sell-seg button.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.15);
+  color: #bbf7d0;
+}
+
+/* —— Quote —— */
+
+.sell-quote {
+  text-align: center;
+}
+
+.sell-quote-price {
+  margin: 0.75rem 0;
+  font-size: clamp(2.4rem, 6vw, 3.4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  line-height: 1.1;
+}
+
+.sell-quote-price.sm {
+  font-size: 1.65rem;
+}
+
+.sell-summary-list {
+  list-style: none;
+  margin: 1.25rem auto;
+  padding: 1rem 1.15rem;
+  max-width: 22rem;
+  text-align: left;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.sell-summary-list li {
+  margin: 0;
+}
+
+.sell-quote .sell-actions {
+  justify-content: center;
+}
+
+/* —— Contact form —— */
+
+.sell-form-grid {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+@media (min-width: 560px) {
+  .sell-form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.sell-span-2 {
+  grid-column: 1 / -1;
+}
+
+.sell-page .sf-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.sell-page .sf-field > span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.sell-page .sf-field input {
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+}
+
+.sell-page .sf-field input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.15);
+}
+
+.sell-page .sf-field input.is-invalid {
+  border-color: var(--danger);
+}
+
+.sell-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+  margin: 0.25rem 0;
+}
+
+.sell-check input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.sell-check a {
+  color: var(--accent);
+}
+
+/* —— Review —— */
+
+.sell-review-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1.25rem 0;
+}
+
+@media (min-width: 640px) {
+  .sell-review-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.sell-review-grid section {
+  padding: 1rem 1.1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.sell-review-grid h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.sell-review-grid p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.sell-review-grid .sell-summary-list {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: none;
+}
+
+/* —— Success —— */
+
+.sell-success {
+  text-align: center;
+  padding: 1.5rem 0.5rem 0.5rem;
+}
+
+.sell-success h2 {
+  margin: 0.5rem 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.sell-ref {
+  display: inline-block;
+  margin: 0.5rem 0 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.sell-ref strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1.35rem;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.sell-success .sell-actions {
+  justify-content: center;
+}
+
+/* —— How it works / prep —— */
+
+.sell-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 1rem;
+}
+
+.sell-section__head {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.sell-section__head h2 {
+  margin: 0 0 0.5rem;
+  font-family: 'Syne', 'DM Sans', sans-serif;
+  font-size: clamp(1.4rem, 3vw, 1.85rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.sell-section__head > p:last-child {
+  margin: 0 auto;
+  max-width: 32rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.sell-how {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .sell-how {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .sell-how {
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+  }
+}
+
+.sell-how__card {
+  padding: 1.25rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.sell-how__card:hover {
+  border-color: rgba(61, 220, 151, 0.35);
+  transform: translateY(-2px);
+}
+
+.sell-how__n {
+  display: block;
+  margin-bottom: 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.sell-how__card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sell-how__card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.sell-prep {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .sell-prep {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .sell-prep {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.sell-prep__card {
+  position: relative;
+  padding: 1.35rem 1.2rem 1.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+}
+
+.sell-prep__icon {
+  display: grid;
+  place-items: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  margin-bottom: 0.85rem;
+  border-radius: 0.75rem;
+  background: rgba(61, 220, 151, 0.1);
+  color: var(--accent);
+  border: 1px solid rgba(61, 220, 151, 0.22);
+}
+
+.sell-prep__n {
+  position: absolute;
+  top: 1.15rem;
+  right: 1.15rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.2);
+}
+
+.sell-prep__card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.sell-prep__card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.sell-section--prep {
+  padding-bottom: 2rem;
+}
+
+.sell-cta-hint {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border-radius: 1.25rem;
+  border: 1px dashed rgba(61, 220, 151, 0.35);
+  background: rgba(61, 220, 151, 0.04);
+  color: var(--text-muted);
+}
