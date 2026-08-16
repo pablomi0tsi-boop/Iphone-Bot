@@ -78,22 +78,15 @@ export function RepairPage() {
         </div>
       </section>
 
-      <div className="repair-page__body" ref={wizardRef} id="zgloszenie">
-        {wizardStarted ? (
+      {wizardStarted ? (
+        <div className="repair-page__body" ref={wizardRef} id="zgloszenie">
           <RepairWizard
             key={wizardKey}
             onCancel={resetWizard}
             initialIssues={initialIssues}
           />
-        ) : (
-          <div className="repair-cta-hint">
-            <p>Kliknij „Rozpocznij zgłoszenie”, aby przejść przez formularz naprawy.</p>
-            <button type="button" className="btn primary" onClick={() => startRepair()}>
-              Rozpocznij zgłoszenie
-            </button>
-          </div>
-        )}
-      </div>
+        </div>
+      ) : null}
 
       <section className="repair-section" id="jak-dziala-serwis">
         <div className="repair-section__head">

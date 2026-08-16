@@ -140,18 +140,6 @@
   font-size: 1rem;
 }
 
-.repair-cta-hint {
-  text-align: center;
-  padding: 2.5rem 1.5rem;
-  border-radius: 1.25rem;
-  border: 1px dashed rgba(61, 220, 151, 0.35);
-  background: rgba(61, 220, 151, 0.04);
-  color: var(--text-muted);
-  display: grid;
-  gap: 1rem;
-  justify-items: center;
-}
-
 /* —— Panel —— */
 
 .repair-panel {
