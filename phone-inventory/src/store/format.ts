@@ -31,3 +31,21 @@ export function availabilityLabel(
 export function conditionBadge(condition: PhoneCondition): string {
   return conditionStoreLabel(condition);
 }
+
+/** Discount percent when compareAtPrice is higher than price; else null. */
+export function discountPercent(
+  price: number,
+  compareAtPrice?: number,
+): number | null {
+  if (typeof compareAtPrice !== 'number' || compareAtPrice <= price) {
+    return null;
+  }
+  return Math.round(((compareAtPrice - price) / compareAtPrice) * 100);
+}
+
+export function isOnSale(product: {
+  price: number;
+  compareAtPrice?: number;
+}): boolean {
+  return discountPercent(product.price, product.compareAtPrice) != null;
+}

@@ -1,7 +1,10 @@
 import type { StoreProduct } from '../types';
 import { productImageForModel } from '../productImages';
 
-/** Catalog product photo (back left + front right) with CSS fallback. */
+/**
+ * Product photos must always match the catalog model.
+ * Prefer the canonical per-model asset; never trust a mismatched image URL.
+ */
 export function ProductVisual({
   product,
   large = false,
@@ -9,9 +12,13 @@ export function ProductVisual({
   product: StoreProduct;
   large?: boolean;
 }) {
+  const catalogImage = productImageForModel(product.modelName);
+  const stored = product.images.find((src) => Boolean(src));
   const image =
-    product.images.find((src) => Boolean(src)) ??
-    productImageForModel(product.modelName);
+    catalogImage ??
+    (stored && looksLikeMatchingModelAsset(stored, product.modelName)
+      ? stored
+      : null);
   const hue = hueForModel(product.modelName);
 
   if (image) {
@@ -39,6 +46,12 @@ export function ProductVisual({
       <span className="sf-visual-model">{product.modelName}</span>
     </div>
   );
+}
+
+function looksLikeMatchingModelAsset(src: string, modelName: string): boolean {
+  const expected = productImageForModel(modelName);
+  if (!expected) return false;
+  return src === expected || src.endsWith(expected);
 }
 
 function hueForModel(modelName: string): number {

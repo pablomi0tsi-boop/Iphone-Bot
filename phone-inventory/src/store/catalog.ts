@@ -92,6 +92,18 @@ export async function listFeaturedByModels(
   return [...picked, ...rest].slice(0, 8);
 }
 
+/** Products with a real compare-at discount (for home “Okazje”). */
+export async function listDealProducts(limit = 8): Promise<StoreProduct[]> {
+  const products = await listStoreProducts();
+  return products
+    .filter(
+      (p) =>
+        typeof p.compareAtPrice === 'number' && p.compareAtPrice > p.price,
+    )
+    .sort((a, b) => dealScore(b) - dealScore(a))
+    .slice(0, limit);
+}
+
 function matchesQuery(product: StoreProduct, query: string): boolean {
   if (!query.trim()) return true;
   const hay = [

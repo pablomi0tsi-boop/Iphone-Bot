@@ -43,6 +43,37 @@ export const POPULAR_STORE_MODELS = [
   'iPhone 14 Pro',
 ] as const;
 
+/** Generation tiles on the home page (family filters). */
+export const STORE_GENERATIONS = [
+  '17',
+  '16',
+  '15',
+  '14',
+  '13',
+  '12',
+  '11',
+] as const;
+
+export type StoreGeneration = (typeof STORE_GENERATIONS)[number];
+
+/** All catalog models belonging to a generation (e.g. 15 → 15 / Plus / Pro / Pro Max). */
+export function modelsInGeneration(generation: string): string[] {
+  const prefix = `iPhone ${generation}`;
+  return CATALOG_MODELS.filter(
+    (name) => name === prefix || name.startsWith(`${prefix} `),
+  );
+}
+
+/** Shop URL that filters to every variant of a generation. */
+export function shopUrlForGeneration(generation: string): string {
+  const models = modelsInGeneration(generation);
+  if (models.length === 0) return '/sklep';
+  if (models.length === 1) {
+    return `/sklep?model=${encodeURIComponent(models[0])}`;
+  }
+  return `/sklep?models=${encodeURIComponent(models.join('|'))}`;
+}
+
 /** Default sale / stock value for each model + storage variant. */
 export const PRICE_BOOK: Record<string, Record<string, number>> = {
   'iPhone 11': { '64 GB': 350, '128 GB': 400, '256 GB': 450 },

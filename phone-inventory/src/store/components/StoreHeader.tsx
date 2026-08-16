@@ -1,30 +1,38 @@
-import { useState, type FormEvent } from 'react';
-import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
+import { useEffect, useState, type FormEvent } from 'react';
+import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useCart } from '../CartContext';
 
 const NAV = [
-  { to: '/sklep', label: 'Sklep', end: false },
-  { to: '/iphone', label: "iPhone'y", end: false },
-  { to: '/sprzedaj', label: "Sprzedaż iPhone'a", end: false },
-  { to: '/napraw', label: 'Napraw', end: false },
-  { to: '/o-nas', label: 'O nas', end: false },
-  { to: '/kontakt', label: 'Kontakt', end: false },
+  { to: '/sklep', label: 'Sklep' },
+  { to: '/sprzedaj', label: "Sprzedaj iPhone'a" },
+  { to: '/napraw', label: 'Napraw' },
+  { to: '/o-nas', label: 'O nas' },
+  { to: '/kontakt', label: 'Kontakt' },
 ] as const;
 
 export function StoreHeader() {
   const { itemCount } = useCart();
   const { session, user, cloudAuthRequired } = useAuth();
   const navigate = useNavigate();
-  const location = useLocation();
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false);
+  const [cartPulse, setCartPulse] = useState(false);
+
+  useEffect(() => {
+    if (itemCount <= 0) return;
+    setCartPulse(true);
+    const t = window.setTimeout(() => setCartPulse(false), 650);
+    return () => window.clearTimeout(t);
+  }, [itemCount]);
 
   const onSearch = (event: FormEvent) => {
     event.preventDefault();
     const q = query.trim();
     navigate(q ? `/sklep?q=${encodeURIComponent(q)}` : '/sklep');
     setMenuOpen(false);
+    setMobileSearchOpen(false);
   };
 
   const accountLabel = session
@@ -48,15 +56,10 @@ export function StoreHeader() {
             <NavLink
               key={item.to}
               to={item.to}
-              className={({ isActive }) => {
-                const catalogActive =
-                  (item.to === '/sklep' || item.to === '/iphone') &&
-                  (location.pathname.startsWith('/sklep') ||
-                    location.pathname === '/iphone');
-                return isActive || catalogActive
-                  ? 'sf-nav-link active'
-                  : 'sf-nav-link';
-              }}
+              className={({ isActive }) =>
+                isActive ? 'sf-nav-link active' : 'sf-nav-link'
+              }
+              end={item.to === '/sklep' ? false : undefined}
             >
               {item.label}
             </NavLink>
@@ -64,14 +67,14 @@ export function StoreHeader() {
         </nav>
 
         <div className="sf-header-actions">
-          <form className="sf-search" onSubmit={onSearch} role="search">
+          <form className="sf-search desktop" onSubmit={onSearch} role="search">
             <label className="sr-only" htmlFor="sf-header-search">
               Szukaj iPhone&apos;a
             </label>
             <input
               id="sf-header-search"
               type="search"
-              placeholder="Model, kolor, nr produktu…"
+              placeholder="Szukaj iPhone'a…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
             />
@@ -80,11 +83,25 @@ export function StoreHeader() {
             </button>
           </form>
 
-          <Link to="/koszyk" className="sf-icon-btn sf-cart-link" aria-label="Koszyk">
-            <CartIcon />
-            {itemCount > 0 ? (
-              <span className="sf-cart-count">{itemCount}</span>
-            ) : null}
+          <button
+            type="button"
+            className="sf-icon-btn sf-search-toggle"
+            aria-label="Szukaj"
+            aria-expanded={mobileSearchOpen}
+            onClick={() => {
+              setMobileSearchOpen((v) => !v);
+              setMenuOpen(false);
+            }}
+          >
+            <SearchIcon />
+          </button>
+
+          <Link
+            to={session ? '/konto' : cloudAuthRequired ? '/konto' : '/magazyn'}
+            className="sf-icon-btn sf-account-icon"
+            aria-label={accountLabel}
+          >
+            <UserIcon />
           </Link>
 
           <Link
@@ -95,31 +112,51 @@ export function StoreHeader() {
             <span>{accountLabel}</span>
           </Link>
 
+          <Link
+            to="/koszyk"
+            className={`sf-icon-btn sf-cart-link${cartPulse ? ' pulse' : ''}`}
+            aria-label="Koszyk"
+          >
+            <CartIcon />
+            {itemCount > 0 ? (
+              <span className="sf-cart-count">{itemCount}</span>
+            ) : null}
+          </Link>
+
           <button
             type="button"
             className="sf-icon-btn sf-menu-toggle"
             aria-expanded={menuOpen}
             aria-label="Menu"
-            onClick={() => setMenuOpen((v) => !v)}
+            onClick={() => {
+              setMenuOpen((v) => !v);
+              setMobileSearchOpen(false);
+            }}
           >
             <MenuIcon open={menuOpen} />
           </button>
         </div>
       </div>
 
-      {menuOpen ? (
-        <div className="sf-mobile-panel">
-          <form className="sf-search mobile" onSubmit={onSearch}>
+      {mobileSearchOpen ? (
+        <div className="sf-mobile-search">
+          <form className="sf-search mobile" onSubmit={onSearch} role="search">
             <input
               type="search"
               placeholder="Szukaj iPhone'a…"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
+              autoFocus
             />
             <button type="submit" className="btn primary">
               Szukaj
             </button>
           </form>
+        </div>
+      ) : null}
+
+      {menuOpen ? (
+        <div className="sf-mobile-panel">
           <nav aria-label="Menu mobilne">
             {NAV.map((item) => (
               <NavLink

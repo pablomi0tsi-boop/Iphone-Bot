@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import { AuthProvider } from './hooks/useAuth';
 import { CartProvider } from './store/CartContext';
+import { FavoritesProvider } from './store/FavoritesContext';
 import { OrdersProvider } from './store/OrdersContext';
 import { StoreLayout } from './store/components/StoreLayout';
 import { MagazynRoute } from './store/MagazynRoute';
@@ -27,7 +28,8 @@ createRoot(document.getElementById('root')!).render(
     <AuthProvider>
       <BrowserRouter>
         <CartProvider>
-          <OrdersProvider>
+          <FavoritesProvider>
+            <OrdersProvider>
             <Routes>
               <Route path="/magazyn" element={<MagazynRoute />} />
 
@@ -49,7 +51,8 @@ createRoot(document.getElementById('root')!).render(
 
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
-          </OrdersProvider>
+            </OrdersProvider>
+          </FavoritesProvider>
         </CartProvider>
       </BrowserRouter>
     </AuthProvider>
