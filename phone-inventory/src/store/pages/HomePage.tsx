@@ -12,6 +12,13 @@ import { ProductCard } from '../components/ProductCard';
 import { ErrorState, LoadingState } from '../components/States';
 import './home.css';
 
+const HERO_TRUST = [
+  { title: 'Sprawdzone urządzenia', icon: 'shield' },
+  { title: 'Gwarancja na każdy zakup', icon: 'medal' },
+  { title: 'Szybka dostawa', icon: 'truck' },
+  { title: 'Wsparcie na każdym etapie', icon: 'headset' },
+] as const;
+
 const WHY = [
   {
     title: 'Sprawdzone urządzenia',
@@ -30,6 +37,53 @@ const WHY = [
     text: 'Masz pytania? Skontaktuj się z nami.',
   },
 ] as const;
+
+function TrustIcon({ name }: { name: (typeof HERO_TRUST)[number]['icon'] }) {
+  const common = {
+    width: 22,
+    height: 22,
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.8,
+    strokeLinecap: 'round' as const,
+    strokeLinejoin: 'round' as const,
+    'aria-hidden': true as const,
+  };
+  if (name === 'shield') {
+    return (
+      <svg {...common}>
+        <path d="M12 3 5 6.5v5.2c0 4.2 2.9 7.9 7 8.8 4.1-.9 7-4.6 7-8.8V6.5L12 3Z" />
+        <path d="m9.2 12.1 1.9 1.9 3.7-3.8" />
+      </svg>
+    );
+  }
+  if (name === 'medal') {
+    return (
+      <svg {...common}>
+        <circle cx="12" cy="9" r="4.2" />
+        <path d="M9.2 12.4 7.5 20l4.5-2.2L16.5 20l-1.7-7.6" />
+      </svg>
+    );
+  }
+  if (name === 'truck') {
+    return (
+      <svg {...common}>
+        <path d="M3 7.5h11v8H3z" />
+        <path d="M14 10.5h4.2L21 13.4v2.1h-7" />
+        <circle cx="7" cy="17.2" r="1.5" />
+        <circle cx="17" cy="17.2" r="1.5" />
+      </svg>
+    );
+  }
+  return (
+    <svg {...common}>
+      <path d="M4.5 14.5v-2a7.5 7.5 0 0 1 15 0v2" />
+      <path d="M4.5 14.5h2.2a1.5 1.5 0 0 1 1.5 1.5v1.2a1.5 1.5 0 0 1-1.5 1.5H5.8A1.3 1.3 0 0 1 4.5 17v-2.5Z" />
+      <path d="M19.5 14.5h-2.2a1.5 1.5 0 0 0-1.5 1.5v1.2a1.5 1.5 0 0 0 1.5 1.5h.9A1.3 1.3 0 0 0 19.5 17v-2.5Z" />
+    </svg>
+  );
+}
 
 const BUY_STEPS = [
   { n: '01', title: 'Wybierz iPhone\'a' },
@@ -67,10 +121,6 @@ export function HomePage() {
     };
   }, []);
 
-  const heroArt =
-    productImageForModel('iPhone 15 Pro') ??
-    productImageForModel('iPhone 14 Pro');
-
   return (
     <main className="sf-home">
       <section className="sf-home-hero">
@@ -82,7 +132,7 @@ export function HomePage() {
               <br />
               Sprawdzone przez nas.
               <br />
-              Gotowe dla Ciebie.
+              <span className="sf-home-hero__accent">Gotowe</span> dla Ciebie.
             </h1>
             <p className="sf-home-hero__lead">
               Sprawdzone urządzenia Apple w atrakcyjnych cenach. Każdy iPhone
@@ -91,20 +141,35 @@ export function HomePage() {
             <div className="sf-home-hero__actions">
               <Link to="/sklep" className="btn primary lg">
                 Zobacz iPhone&apos;y
+                <span className="sf-home-hero__cta-arrow" aria-hidden="true">
+                  →
+                </span>
               </Link>
               <Link to="/sprzedaj" className="btn ghost lg">
                 Sprzedaj swojego iPhone&apos;a
               </Link>
             </div>
           </div>
-          <div className="sf-home-hero__visual" aria-hidden="true">
-            <div className="sf-home-hero__glow" />
-            {heroArt ? (
-              <img src={heroArt} alt="" />
-            ) : (
-              <div className="sf-home-hero__placeholder" />
-            )}
+          <div className="sf-home-hero__visual">
+            <img
+              src="/hero/smartfix-home-hero.png"
+              alt="Klient SmartFix z używanym iPhone'em"
+              width={900}
+              height={1200}
+              decoding="async"
+              fetchPriority="high"
+            />
           </div>
+          <ul className="sf-home-hero__trust">
+            {HERO_TRUST.map((item) => (
+              <li key={item.title}>
+                <span className="sf-home-hero__trust-icon">
+                  <TrustIcon name={item.icon} />
+                </span>
+                <span>{item.title}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
