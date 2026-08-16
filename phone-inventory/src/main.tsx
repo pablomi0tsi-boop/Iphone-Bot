@@ -15,7 +15,6 @@ import { AccountPage } from './store/pages/AccountPage';
 import {
   AboutPage,
   ContactPage,
-  ModelsPage,
   PrivacyPage,
   TermsPage,
 } from './store/pages/ContentPages';
@@ -34,7 +33,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route index element={<HomePage />} />
                 <Route path="sklep" element={<ShopPage />} />
                 <Route path="sklep/:id" element={<ProductPage />} />
-                <Route path="iphone" element={<ModelsPage />} />
+                <Route path="iphone" element={<ShopPage />} />
                 <Route path="koszyk" element={<CartPage />} />
                 <Route path="zamowienie" element={<CheckoutPage />} />
                 <Route path="konto" element={<AccountPage />} />

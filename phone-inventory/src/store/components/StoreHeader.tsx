@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { Link, NavLink, useNavigate } from 'react-router-dom';
+import { Link, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../../hooks/useAuth';
 import { useCart } from '../CartContext';
 
@@ -14,6 +14,7 @@ export function StoreHeader() {
   const { itemCount } = useCart();
   const { session, user, cloudAuthRequired } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [query, setQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
 
@@ -45,9 +46,15 @@ export function StoreHeader() {
             <NavLink
               key={item.to}
               to={item.to}
-              className={({ isActive }) =>
-                isActive ? 'sf-nav-link active' : 'sf-nav-link'
-              }
+              className={({ isActive }) => {
+                const catalogActive =
+                  (item.to === '/sklep' || item.to === '/iphone') &&
+                  (location.pathname.startsWith('/sklep') ||
+                    location.pathname === '/iphone');
+                return isActive || catalogActive
+                  ? 'sf-nav-link active'
+                  : 'sf-nav-link';
+              }}
             >
               {item.label}
             </NavLink>

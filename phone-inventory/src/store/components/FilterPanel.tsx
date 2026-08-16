@@ -5,7 +5,6 @@ import {
   STORE_MODEL_OPTIONS,
   STORE_STORAGE_OPTIONS,
   type StoreFilters,
-  type StoreSort,
 } from '../types';
 
 interface FilterPanelProps {
@@ -21,7 +20,10 @@ export function FilterPanel({
   onChange,
   onReset,
 }: FilterPanelProps) {
-  const toggle = (key: 'models' | 'storages' | 'conditions' | 'colors', value: string) => {
+  const toggle = (
+    key: 'models' | 'storages' | 'conditions' | 'colors',
+    value: string,
+  ) => {
     const list = filters[key] as string[];
     const next = list.includes(value)
       ? list.filter((v) => v !== value)
@@ -30,10 +32,10 @@ export function FilterPanel({
   };
 
   return (
-    <aside className="sf-filters" aria-label="Filtry">
+    <aside className="sf-filters" aria-label="Filtry katalogu">
       <div className="sf-filters-head">
         <h2>Filtry</h2>
-        <button type="button" className="btn ghost sm" onClick={onReset}>
+        <button type="button" className="sf-link-btn" onClick={onReset}>
           Wyczyść
         </button>
       </div>
@@ -43,7 +45,7 @@ export function FilterPanel({
         <input
           type="search"
           value={filters.query}
-          placeholder="Model, kolor, nr produktu…"
+          placeholder="Model, kolor, nr…"
           onChange={(e) => onChange({ ...filters, query: e.target.value })}
         />
       </label>
@@ -64,16 +66,22 @@ export function FilterPanel({
       </FilterGroup>
 
       <FilterGroup title="Pamięć">
-        {STORE_STORAGE_OPTIONS.map((storage) => (
-          <label key={storage} className="sf-check">
-            <input
-              type="checkbox"
-              checked={filters.storages.includes(storage)}
-              onChange={() => toggle('storages', storage)}
-            />
-            <span>{storage}</span>
-          </label>
-        ))}
+        <div className="sf-chip-row">
+          {STORE_STORAGE_OPTIONS.map((storage) => {
+            const on = filters.storages.includes(storage);
+            return (
+              <button
+                key={storage}
+                type="button"
+                className={`sf-chip ${on ? 'on' : ''}`}
+                aria-pressed={on}
+                onClick={() => toggle('storages', storage)}
+              >
+                {storage}
+              </button>
+            );
+          })}
+        </div>
       </FilterGroup>
 
       <FilterGroup title="Stan">
@@ -89,7 +97,7 @@ export function FilterPanel({
         ))}
       </FilterGroup>
 
-      <FilterGroup title="Bateria">
+      <FilterGroup title="Kondycja baterii">
         {BATTERY_FILTER_OPTIONS.map((b) => (
           <label key={b.value} className="sf-check">
             <input
@@ -101,35 +109,6 @@ export function FilterPanel({
             <span>{b.label}</span>
           </label>
         ))}
-      </FilterGroup>
-
-      <FilterGroup title="Cena (zł)">
-        <div className="sf-price-range">
-          <input
-            type="number"
-            min={0}
-            placeholder="Od"
-            value={filters.priceMin || ''}
-            onChange={(e) =>
-              onChange({
-                ...filters,
-                priceMin: Number(e.target.value) || 0,
-              })
-            }
-          />
-          <input
-            type="number"
-            min={0}
-            placeholder="Do"
-            value={filters.priceMax || ''}
-            onChange={(e) =>
-              onChange({
-                ...filters,
-                priceMax: Number(e.target.value) || 0,
-              })
-            }
-          />
-        </div>
       </FilterGroup>
 
       {colors.length > 0 ? (
@@ -149,20 +128,39 @@ export function FilterPanel({
         </FilterGroup>
       ) : null}
 
-      <label className="sf-field">
-        <span>Sortowanie</span>
-        <select
-          value={filters.sort}
-          onChange={(e) =>
-            onChange({ ...filters, sort: e.target.value as StoreSort })
-          }
-        >
-          <option value="newest">Najnowsze</option>
-          <option value="price_asc">Najtańsze</option>
-          <option value="price_desc">Najdroższe</option>
-          <option value="best_deal">Najlepsza okazja</option>
-        </select>
-      </label>
+      <FilterGroup title="Cena">
+        <div className="sf-price-range">
+          <input
+            type="number"
+            min={0}
+            placeholder="Od"
+            inputMode="numeric"
+            value={filters.priceMin || ''}
+            onChange={(e) =>
+              onChange({
+                ...filters,
+                priceMin: Number(e.target.value) || 0,
+              })
+            }
+          />
+          <span className="sf-price-sep" aria-hidden="true">
+            –
+          </span>
+          <input
+            type="number"
+            min={0}
+            placeholder="Do"
+            inputMode="numeric"
+            value={filters.priceMax || ''}
+            onChange={(e) =>
+              onChange({
+                ...filters,
+                priceMax: Number(e.target.value) || 0,
+              })
+            }
+          />
+        </div>
+      </FilterGroup>
     </aside>
   );
 }
