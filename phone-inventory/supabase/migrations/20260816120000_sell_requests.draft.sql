@@ -1,0 +1,48 @@
+-- =============================================================================
+-- OPTIONAL future migration — do NOT apply until approved.
+-- Public sell-your-iPhone submissions (`sell_requests`).
+-- Source of truth for app fields: phone-inventory/src/sell/types.ts
+-- =============================================================================
+
+-- create table if not exists public.sell_requests (
+--   id uuid primary key default gen_random_uuid(),
+--   created_at timestamptz not null default now(),
+--   user_id uuid references auth.users (id) on delete set null,
+--   model text not null,
+--   storage text not null,
+--   condition text not null
+--     check (condition in ('idealny', 'bardzo_dobry', 'dobry', 'uszkodzony')),
+--   battery_health text not null
+--     check (battery_health in ('90_100', '80_89', 'below_80', 'unknown')),
+--   screen_original text not null
+--     check (screen_original in ('yes', 'no', 'unknown')),
+--   was_repaired text not null
+--     check (was_repaired in ('yes', 'no', 'unknown')),
+--   face_id text not null check (face_id in ('yes', 'no')),
+--   cameras text not null check (cameras in ('yes', 'no')),
+--   charging text not null check (charging in ('yes', 'no')),
+--   icloud_lock_free text not null check (icloud_lock_free in ('yes', 'no')),
+--   carrier_lock text not null
+--     check (carrier_lock in ('yes', 'no', 'unknown')),
+--   body_damaged text not null check (body_damaged in ('yes', 'no')),
+--   estimated_price numeric(12, 2) not null check (estimated_price >= 0),
+--   seller_name text not null,
+--   seller_email text not null,
+--   seller_phone text not null,
+--   bank_account text,
+--   delivery_method text not null
+--     check (delivery_method in ('courier', 'in_person')),
+--   status text not null default 'new'
+--     check (status in (
+--       'new', 'contacted', 'accepted', 'received', 'verified', 'paid', 'cancelled'
+--     )),
+--   reference_number text not null unique
+-- );
+--
+-- create index if not exists sell_requests_created_at_idx
+--   on public.sell_requests (created_at desc);
+-- create index if not exists sell_requests_status_idx
+--   on public.sell_requests (status);
+--
+-- alter table public.sell_requests enable row level security;
+-- -- Add RLS policies when enabling (public insert + staff read).

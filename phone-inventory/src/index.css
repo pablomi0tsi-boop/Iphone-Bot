@@ -1,11 +1,11 @@
 :root {
   color-scheme: dark;
-  --bg: #070b14;
-  --bg-elevated: #101827;
-  --bg-card: #151e2e;
-  --bg-card-hover: #1a2438;
+  --bg: #05070d;
+  --bg-elevated: #0e1522;
+  --bg-card: #101826;
+  --bg-card-hover: #151e2e;
   --border: rgba(255, 255, 255, 0.08);
-  --text: #eef3ff;
+  --text: #f3f6fb;
   --text-muted: #8b97b0;
   --accent: #3ddc97;
   --accent-dim: rgba(61, 220, 151, 0.15);

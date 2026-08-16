@@ -267,13 +267,17 @@ export async function ensureSupabaseAuth(
   return data.session;
 }
 
-export async function signInWithGitHub(): Promise<void> {
+export async function signInWithGitHub(
+  redirectPath = '/magazyn',
+): Promise<void> {
   const supabase = createSupabaseClient();
+  const redirectTo = new URL(
+    redirectPath.startsWith('/') ? redirectPath : `/${redirectPath}`,
+    window.location.origin,
+  ).toString();
   const { error } = await supabase.auth.signInWithOAuth({
     provider: 'github',
-    options: {
-      redirectTo: window.location.origin,
-    },
+    options: { redirectTo },
   });
   if (error) {
     throw new Error(`GitHub OAuth: ${error.message}`);
