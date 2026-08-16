@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react';
 import { Link } from 'react-router-dom';
 import { CATALOG_MODELS } from '../domain/catalog';
 import { useAuth } from '../hooks/useAuth';
@@ -37,6 +37,7 @@ const STEP_TITLES: Record<Exclude<SellWizardStep, 'done'>, string> = {
 
 export function SellWizard({ onCancel }: { onCancel: () => void }) {
   const { user } = useAuth();
+  const panelRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<SellWizardStep>('model');
   const [model, setModel] = useState('');
   const [storage, setStorage] = useState('');
@@ -52,6 +53,10 @@ export function SellWizard({ onCancel }: { onCancel: () => void }) {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState<SellRequest | null>(null);
+
+  useEffect(() => {
+    panelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, [step]);
 
   const storages = useMemo(
     () => (model ? storagesForSellModel(model) : []),
@@ -134,7 +139,7 @@ export function SellWizard({ onCancel }: { onCancel: () => void }) {
 
   if (step === 'done' && submitted) {
     return (
-      <div className="sell-panel sell-success" role="status">
+      <div className="sell-panel sell-success" role="status" ref={panelRef}>
         <p className="sf-eyebrow">Zgłoszenie</p>
         <h2>Gotowe! Otrzymaliśmy Twoje zgłoszenie.</h2>
         <p className="sf-muted">
@@ -156,7 +161,7 @@ export function SellWizard({ onCancel }: { onCancel: () => void }) {
   }
 
   return (
-    <div className="sell-panel">
+    <div className="sell-panel" ref={panelRef}>
       <div className="sell-progress" aria-label="Postęp wyceny">
         <div className="sell-progress-meta">
           <span>

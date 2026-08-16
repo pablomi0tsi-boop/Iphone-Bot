@@ -148,6 +148,7 @@
   border-radius: 1.25rem;
   padding: 1.5rem 1.35rem 1.35rem;
   box-shadow: var(--shadow);
+  scroll-margin-top: 5.5rem;
 }
 
 @media (min-width: 768px) {
