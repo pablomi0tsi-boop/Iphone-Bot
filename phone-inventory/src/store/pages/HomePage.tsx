@@ -1,43 +1,46 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { listFeaturedProducts } from '../catalog';
-import type { StoreBrand, StoreProduct } from '../types';
+import { POPULAR_STORE_MODELS } from '../../domain/catalog';
+import { listFeaturedByModels, listStoreProducts } from '../catalog';
+import type { StoreProduct } from '../types';
 import { ProductCard } from '../components/ProductCard';
+import { ErrorState, LoadingState } from '../components/States';
 
-const CATEGORIES: { brand: StoreBrand | 'all'; label: string; hint: string }[] =
-  [
-    { brand: 'Apple', label: 'iPhone', hint: 'Sprawdzone Apple' },
-    { brand: 'Samsung', label: 'Samsung', hint: 'Galaxy i więcej' },
-    { brand: 'Other', label: 'Pozostałe', hint: 'Inne marki' },
-  ];
-
-const WHY = [
+const HOW = [
   {
-    title: 'Sprawdzone urządzenia',
-    text: 'Każdy telefon przechodzi testy sprawności przed wystawieniem.',
+    title: 'Selekcja',
+    text: 'Przyjmujemy tylko sprawdzone iPhone’y w dobrym stanie technicznym.',
+  },
+  {
+    title: 'Testy',
+    text: 'Face ID, True Tone, aparaty, bateria i łączność — każdy punkt na liście.',
   },
   {
     title: 'Gwarancja',
-    text: 'Kupujesz ze spokojem — gwarancja SmartFix na każdy egzemplarz.',
-  },
-  {
-    title: 'Szybka wysyłka',
-    text: 'Spakowane i gotowe do drogi. Śledzenie przesyłki w standardzie.',
-  },
-  {
-    title: 'Bezpieczne zakupy',
-    text: 'Uczciwy opis stanu, zdjęcia i jasna cena — bez niespodzianek.',
+    text: 'Kupujesz ze spokojem. Każdy egzemplarz ma gwarancję SmartFix.',
   },
 ];
 
 export function HomePage() {
   const [featured, setFeatured] = useState<StoreProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void listFeaturedProducts(4).then((items) => {
-      if (!cancelled) setFeatured(items);
-    });
+    void listFeaturedByModels(POPULAR_STORE_MODELS)
+      .then((items) => {
+        if (!cancelled) {
+          setFeatured(items);
+          setLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Błąd ładowania');
+          setLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -45,80 +48,98 @@ export function HomePage() {
 
   return (
     <main>
-      <section className="hero">
-        <div className="hero-inner">
-          <p className="hero-eyebrow">SmartFix</p>
-          <h1>Znajdź swojego iPhone&apos;a</h1>
-          <p className="hero-lead">
-            Sprawdzone telefony, uczciwe ceny i gwarancja.
+      <section className="sf-hero">
+        <div className="sf-hero-inner">
+          <p className="sf-eyebrow">SmartFix</p>
+          <h1>Używane iPhone&apos;y. Sprawdzone. Gotowe do użycia.</h1>
+          <p className="sf-hero-lead">
+            Każdy iPhone jest dokładnie sprawdzany przed sprzedażą.
           </p>
-          <div className="hero-actions">
+          <div className="sf-hero-actions">
             <Link to="/sklep" className="btn primary">
-              Zobacz telefony
+              Zobacz iPhone&apos;y
             </Link>
-            <Link to="/skup" className="btn ghost">
-              Sprzedaj telefon
-            </Link>
+            <a href="#jak-dzialamy" className="btn ghost">
+              Jak działamy?
+            </a>
           </div>
         </div>
       </section>
 
-      <section className="store-section">
-        <div className="store-section-head">
-          <h2>Kategorie</h2>
-          <p>Wybierz markę i przejdź prosto do oferty.</p>
+      <section className="sf-section">
+        <div className="sf-section-head">
+          <div>
+            <h2>Znajdź swojego iPhone&apos;a</h2>
+            <p className="sf-muted">Popularne modele w ofercie SmartFix.</p>
+          </div>
+          <Link to="/iphone">Wszystkie modele</Link>
         </div>
-        <div className="category-grid">
-          {CATEGORIES.map((cat) => (
+        <div className="sf-model-grid">
+          {POPULAR_STORE_MODELS.map((model) => (
             <Link
-              key={cat.label}
-              to={`/sklep?brand=${cat.brand}`}
-              className="category-tile"
+              key={model}
+              to={`/sklep?model=${encodeURIComponent(model)}`}
+              className="sf-model-tile"
             >
-              <span className="category-label">{cat.label}</span>
-              <span className="category-hint">{cat.hint}</span>
+              <span>{model}</span>
             </Link>
           ))}
         </div>
       </section>
 
-      <section className="store-section">
-        <div className="store-section-head">
-          <h2>Polecane telefony</h2>
-          <Link to="/sklep">Zobacz wszystkie</Link>
+      <section className="sf-section" id="oferta">
+        <div className="sf-section-head">
+          <div>
+            <h2>Polecane egzemplarze</h2>
+            <p className="sf-muted">Gotowe do wysyłki — jeden telefon, jedna sztuka.</p>
+          </div>
+          <Link to="/sklep">Sklep</Link>
         </div>
-        <div className="product-grid">
-          {featured.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        {loading ? <LoadingState label="Ładowanie oferty…" /> : null}
+        {error ? (
+          <ErrorState
+            message={error}
+            onRetry={() => {
+              setLoading(true);
+              setError(null);
+              void listStoreProducts()
+                .then((items) => {
+                  setFeatured(items.slice(0, 8));
+                  setLoading(false);
+                })
+                .catch((err: unknown) => {
+                  setError(
+                    err instanceof Error ? err.message : 'Błąd ładowania',
+                  );
+                  setLoading(false);
+                });
+            }}
+          />
+        ) : null}
+        {!loading && !error ? (
+          <div className="sf-product-grid">
+            {featured.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+          </div>
+        ) : null}
       </section>
 
-      <section className="store-section">
-        <div className="store-section-head">
-          <h2>Dlaczego SmartFix?</h2>
-          <p>Premium doświadczenie zakupowe bez ryzyka.</p>
+      <section className="sf-section" id="jak-dzialamy">
+        <div className="sf-section-head">
+          <div>
+            <h2>Jak działamy?</h2>
+            <p className="sf-muted">Prosty proces, premium jakość.</p>
+          </div>
         </div>
-        <div className="why-grid">
-          {WHY.map((item) => (
-            <article key={item.title} className="why-card">
+        <div className="sf-how-grid">
+          {HOW.map((item, index) => (
+            <article key={item.title} className="sf-how-card">
+              <span className="sf-how-num">0{index + 1}</span>
               <h3>{item.title}</h3>
               <p>{item.text}</p>
             </article>
           ))}
-        </div>
-      </section>
-
-      <section className="cta-band">
-        <div className="cta-band-inner">
-          <h2>Chcesz sprzedać swój telefon?</h2>
-          <p>
-            Szybka wycena online. Fair deal, bezpieczna transakcja, wypłata bez
-            zbędnych formalności.
-          </p>
-          <Link to="/skup" className="btn primary">
-            Oblicz wycenę
-          </Link>
         </div>
       </section>
     </main>

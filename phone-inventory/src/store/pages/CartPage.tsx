@@ -1,49 +1,62 @@
 import { Link } from 'react-router-dom';
 import { useCart } from '../CartContext';
-import { batteryLabel, conditionLabel, formatPricePln } from '../format';
+import { ProductVisual } from '../components/ProductVisual';
+import { EmptyState } from '../components/States';
+import {
+  batteryLabel,
+  conditionBadge,
+  formatPricePln,
+} from '../format';
+
+const DELIVERY_PREVIEW = 19;
 
 export function CartPage() {
-  const { lines, total, removeItem, itemCount } = useCart();
+  const { lines, productsTotal, removeItem, itemCount, ready } = useCart();
+  const total = productsTotal + (itemCount > 0 ? DELIVERY_PREVIEW : 0);
 
   return (
-    <main className="store-page">
-      <header className="store-page-header">
-        <p className="hero-eyebrow">Koszyk</p>
+    <main className="sf-page">
+      <header className="sf-page-header">
+        <p className="sf-eyebrow">Koszyk</p>
         <h1>Twój koszyk</h1>
-        <p>
+        <p className="sf-muted">
           {itemCount === 0
             ? 'Koszyk jest pusty.'
-            : `${itemCount} ${itemCount === 1 ? 'produkt' : 'produkty'} w koszyku.`}
+            : `${itemCount} ${itemCount === 1 ? 'iPhone' : 'iPhone\'y'} w koszyku.`}
         </p>
       </header>
 
-      {lines.length === 0 ? (
-        <div className="empty-state">
-          <p>Dodaj telefon ze sklepu, aby kontynuować.</p>
-          <Link to="/sklep" className="btn primary">
-            Przejdź do sklepu
-          </Link>
-        </div>
-      ) : (
-        <div className="cart-layout">
-          <ul className="cart-list">
-            {lines.map(({ product }) => (
-              <li key={product.id} className="cart-row">
-                <div
-                  className={`cart-thumb brand-${product.brand.toLowerCase()}`}
-                  aria-hidden="true"
-                />
-                <div className="cart-row-info">
+      {!ready ? <p className="sf-muted">Synchronizacja koszyka…</p> : null}
+
+      {ready && lines.length === 0 ? (
+        <EmptyState
+          title="Brak produktów"
+          text="Dodaj iPhone'a ze sklepu, aby kontynuować."
+          action={
+            <Link to="/sklep" className="btn primary">
+              Przejdź do sklepu
+            </Link>
+          }
+        />
+      ) : null}
+
+      {lines.length > 0 ? (
+        <div className="sf-cart-layout">
+          <ul className="sf-cart-list">
+            {lines.map(({ product, quantity }) => (
+              <li key={product.id} className="sf-cart-row">
+                <div className="sf-cart-thumb">
+                  <ProductVisual product={product} />
+                </div>
+                <div className="sf-cart-info">
                   <h2>{product.modelName}</h2>
-                  <p>
-                    {product.storage}
-                    {product.color ? ` · ${product.color}` : ''} · Bateria{' '}
+                  <p className="sf-muted">
+                    {product.storage} · {product.color} · Bateria{' '}
                     {batteryLabel(product.batteryPercent)} ·{' '}
-                    {conditionLabel(product.condition)}
+                    {conditionBadge(product.condition)}
                   </p>
-                  <p className="cart-row-price">
-                    {formatPricePln(product.price)}
-                  </p>
+                  <p className="sf-muted">Ilość: {quantity}</p>
+                  <p className="sf-price">{formatPricePln(product.price)}</p>
                 </div>
                 <button
                   type="button"
@@ -56,25 +69,29 @@ export function CartPage() {
             ))}
           </ul>
 
-          <aside className="cart-summary">
+          <aside className="sf-summary">
             <h2>Podsumowanie</h2>
-            <div className="cart-summary-row">
+            <div className="sf-summary-row">
+              <span>Wartość produktów</span>
+              <span>{formatPricePln(productsTotal)}</span>
+            </div>
+            <div className="sf-summary-row">
+              <span>Dostawa (szacunek)</span>
+              <span>{formatPricePln(DELIVERY_PREVIEW)}</span>
+            </div>
+            <div className="sf-summary-row total">
               <span>Suma</span>
               <strong>{formatPricePln(total)}</strong>
             </div>
-            <button type="button" className="btn primary block" disabled>
+            <Link to="/zamowienie" className="btn primary block">
               Przejdź do zamówienia
-            </button>
-            <p className="product-note">
-              Płatności i składanie zamówień pojawią się w kolejnym etapie.
-              Na razie koszyk działa tylko jako UI.
-            </p>
+            </Link>
             <Link to="/sklep" className="btn ghost block">
               Kontynuuj zakupy
             </Link>
           </aside>
         </div>
-      )}
+      ) : null}
     </main>
   );
 }

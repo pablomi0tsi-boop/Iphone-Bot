@@ -14,13 +14,13 @@ const CART_KEY = 'smartfix-store:cart:v1';
 
 interface CartContextValue {
   items: CartItem[];
-  /** Resolved products for cart rows (missing ids are dropped). */
   lines: { product: StoreProduct; quantity: number }[];
   itemCount: number;
-  total: number;
+  productsTotal: number;
   ready: boolean;
-  addItem: (productId: string) => void;
+  addItem: (productId: string) => boolean;
   removeItem: (productId: string) => void;
+  setQuantity: (productId: string, quantity: number) => void;
   clear: () => void;
 }
 
@@ -69,17 +69,38 @@ export function CartProvider({ children }: { children: ReactNode }) {
   }, [items]);
 
   const addItem = useCallback((productId: string) => {
+    let added = false;
     setItems((prev) => {
-      const existing = prev.find((i) => i.productId === productId);
-      // Each physical unit is unique — quantity stays 1.
-      if (existing) return prev;
+      if (prev.some((i) => i.productId === productId)) return prev;
+      // Each physical unit is unique — quantity is always 1.
+      added = true;
       return [...prev, { productId, quantity: 1 }];
     });
-    void getStoreProduct(productId);
+    void getStoreProduct(productId).then((product) => {
+      if (product) {
+        setCatalog((prev) =>
+          prev.some((p) => p.id === product.id) ? prev : [...prev, product],
+        );
+      }
+    });
+    return added;
   }, []);
 
   const removeItem = useCallback((productId: string) => {
     setItems((prev) => prev.filter((i) => i.productId !== productId));
+  }, []);
+
+  const setQuantity = useCallback((productId: string, quantity: number) => {
+    if (quantity <= 0) {
+      setItems((prev) => prev.filter((i) => i.productId !== productId));
+      return;
+    }
+    // Physical units stay at qty 1.
+    setItems((prev) =>
+      prev.map((i) =>
+        i.productId === productId ? { ...i, quantity: 1 } : i,
+      ),
+    );
   }, []);
 
   const clear = useCallback(() => setItems([]), []);
@@ -97,8 +118,8 @@ export function CartProvider({ children }: { children: ReactNode }) {
       );
   }, [items, catalog]);
 
-  const itemCount = lines.length;
-  const total = lines.reduce(
+  const itemCount = lines.reduce((sum, line) => sum + line.quantity, 0);
+  const productsTotal = lines.reduce(
     (sum, line) => sum + line.product.price * line.quantity,
     0,
   );
@@ -108,13 +129,24 @@ export function CartProvider({ children }: { children: ReactNode }) {
       items,
       lines,
       itemCount,
-      total,
+      productsTotal,
       ready,
       addItem,
       removeItem,
+      setQuantity,
       clear,
     }),
-    [items, lines, itemCount, total, ready, addItem, removeItem, clear],
+    [
+      items,
+      lines,
+      itemCount,
+      productsTotal,
+      ready,
+      addItem,
+      removeItem,
+      setQuantity,
+      clear,
+    ],
   );
 
   return <CartContext.Provider value={value}>{children}</CartContext.Provider>;

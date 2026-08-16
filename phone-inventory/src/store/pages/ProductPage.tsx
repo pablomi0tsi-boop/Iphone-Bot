@@ -2,8 +2,16 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import { getStoreProduct } from '../catalog';
-import { batteryLabel, conditionLabel, formatPricePln } from '../format';
-import type { StoreProduct } from '../types';
+import { ProductVisual } from '../components/ProductVisual';
+import { EmptyState, ErrorState, LoadingState } from '../components/States';
+import {
+  availabilityLabel,
+  batteryLabel,
+  conditionBadge,
+  formatPricePln,
+  warrantyLabel,
+} from '../format';
+import { CHECKED_FEATURES, type StoreProduct } from '../types';
 
 export function ProductPage() {
   const { id } = useParams<{ id: string }>();
@@ -11,17 +19,27 @@ export function ProductPage() {
   const { addItem } = useCart();
   const [product, setProduct] = useState<StoreProduct | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
+  const [activeImage, setActiveImage] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    void getStoreProduct(id ?? '').then((item) => {
-      if (!cancelled) {
-        setProduct(item);
-        setLoading(false);
-      }
-    });
+    setError(null);
+    void getStoreProduct(id ?? '')
+      .then((item) => {
+        if (!cancelled) {
+          setProduct(item);
+          setLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : 'Błąd ładowania');
+          setLoading(false);
+        }
+      });
     return () => {
       cancelled = true;
     };
@@ -29,105 +47,151 @@ export function ProductPage() {
 
   if (loading) {
     return (
-      <main className="store-page">
-        <div className="empty-state">
-          <p>Ładowanie produktu…</p>
-        </div>
+      <main className="sf-page">
+        <LoadingState label="Ładowanie iPhone'a…" />
+      </main>
+    );
+  }
+
+  if (error) {
+    return (
+      <main className="sf-page">
+        <ErrorState message={error} onRetry={() => window.location.reload()} />
       </main>
     );
   }
 
   if (!product) {
     return (
-      <main className="store-page">
-        <div className="empty-state">
-          <h1>Nie znaleziono telefonu</h1>
-          <p>Ten egzemplarz może być już niedostępny.</p>
-          <Link to="/sklep" className="btn primary">
-            Wróć do sklepu
-          </Link>
-        </div>
+      <main className="sf-page">
+        <EmptyState
+          title="Nie znaleziono iPhone'a"
+          text="Ten egzemplarz może być już niedostępny."
+          action={
+            <Link to="/sklep" className="btn primary">
+              Wróć do sklepu
+            </Link>
+          }
+        />
       </main>
     );
   }
 
-  const onAdd = () => {
-    addItem(product.id);
-    setAdded(true);
-  };
-
-  const onBuyNow = () => {
-    addItem(product.id);
-    navigate('/koszyk');
-  };
+  const available = product.listingStatus === 'available';
+  const gallery = product.images.length
+    ? product.images
+    : ['visual-0', 'visual-1', 'visual-2'];
 
   return (
-    <main className="store-page product-page">
-      <Link to="/sklep" className="back-link">
+    <main className="sf-page sf-product-page">
+      <Link to="/sklep" className="sf-back">
         ← Wróć do sklepu
       </Link>
 
-      <div className="product-detail">
-        <div
-          className={`product-gallery brand-${product.brand.toLowerCase()}`}
-          aria-hidden="true"
-        >
-          <span className="product-gallery-glyph">
-            {product.brand === 'Samsung' ? 'S' : '⌘'}
-          </span>
-          <p>{product.modelName}</p>
+      <div className="sf-product-layout">
+        <div>
+          <ProductVisual product={product} large />
+          <div className="sf-gallery-thumbs" role="tablist" aria-label="Galeria">
+            {gallery.map((src, index) => (
+              <button
+                key={src}
+                type="button"
+                className={index === activeImage ? 'active' : ''}
+                aria-label={`Zdjęcie ${index + 1}`}
+                onClick={() => setActiveImage(index)}
+              >
+                <span className="sf-thumb-dot" />
+              </button>
+            ))}
+          </div>
         </div>
 
-        <div className="product-info">
-          <p className="hero-eyebrow">{product.brand}</p>
+        <div className="sf-product-info">
+          <p className="sf-eyebrow">{product.productNumber}</p>
           <h1>{product.modelName}</h1>
-          <p className="product-detail-price">
-            {formatPricePln(product.price)}
+          <p
+            className={`sf-badge inline ${available ? 'ok' : 'muted'}`}
+          >
+            {availabilityLabel(product.listingStatus)}
           </p>
 
-          <dl className="product-specs">
+          <div className="sf-card-price-row" style={{ marginTop: 12 }}>
+            <p className="sf-price xl">{formatPricePln(product.price)}</p>
+            {product.compareAtPrice &&
+            product.compareAtPrice > product.price ? (
+              <p className="sf-price-was">
+                {formatPricePln(product.compareAtPrice)}
+              </p>
+            ) : null}
+          </div>
+
+          <dl className="sf-specs">
             <div>
               <dt>Pamięć</dt>
               <dd>{product.storage}</dd>
             </div>
-            {product.color ? (
-              <div>
-                <dt>Kolor</dt>
-                <dd>{product.color}</dd>
-              </div>
-            ) : null}
+            <div>
+              <dt>Kolor</dt>
+              <dd>{product.color}</dd>
+            </div>
             <div>
               <dt>Bateria</dt>
               <dd>{batteryLabel(product.batteryPercent)}</dd>
             </div>
             <div>
               <dt>Stan wizualny</dt>
-              <dd>{conditionLabel(product.condition)}</dd>
+              <dd>{conditionBadge(product.condition)}</dd>
             </div>
           </dl>
 
-          <section className="product-block">
+          <section className="sf-block">
             <h2>Opis</h2>
             <p>{product.description}</p>
           </section>
 
-          <section className="product-block">
+          <section className="sf-block">
             <h2>Gwarancja</h2>
-            <p>{product.warranty}</p>
+            <p>
+              {warrantyLabel(product.warrantyMonths)} — wymiana lub naprawa
+              zgodnie z regulaminem SmartFix.
+            </p>
           </section>
 
-          <div className="product-actions">
-            <button type="button" className="btn primary" onClick={onAdd}>
+          <section className="sf-block">
+            <h2>Co zostało sprawdzone?</h2>
+            <ul className="sf-checklist">
+              {CHECKED_FEATURES.map((item) => (
+                <li key={item}>
+                  <span aria-hidden="true">✓</span> {item}
+                </li>
+              ))}
+            </ul>
+          </section>
+
+          <div className="sf-product-actions">
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!available}
+              onClick={() => {
+                addItem(product.id);
+                setAdded(true);
+              }}
+            >
               {added ? 'Dodano do koszyka' : 'Dodaj do koszyka'}
             </button>
-            <button type="button" className="btn ghost" onClick={onBuyNow}>
+            <button
+              type="button"
+              className="btn ghost"
+              disabled={!available}
+              onClick={() => {
+                addItem(product.id);
+                navigate('/koszyk');
+              }}
+            >
               Kup teraz
             </button>
           </div>
-          <p className="product-note">
-            To osobny egzemplarz fizyczny. Płatności online wkrótce — na razie
-            możesz dodać telefon do koszyka.
-          </p>
         </div>
       </div>
     </main>

@@ -1,4 +1,4 @@
-/** Canonical model names + default resale values (PLN) by storage. */
+/** Canonical iPhone model names + default resale values (PLN) by storage. */
 
 export const CATALOG_MODELS = [
   'iPhone 11',
@@ -24,9 +24,24 @@ export const CATALOG_MODELS = [
   'iPhone 16 Plus',
   'iPhone 16 Pro',
   'iPhone 16 Pro Max',
+  'iPhone 17',
+  'iPhone 17 Pro',
+  'iPhone 17 Pro Max',
 ] as const;
 
 export type CatalogModelName = (typeof CATALOG_MODELS)[number];
+
+/** Popular models highlighted on the storefront home page. */
+export const POPULAR_STORE_MODELS = [
+  'iPhone 17 Pro Max',
+  'iPhone 17 Pro',
+  'iPhone 16 Pro Max',
+  'iPhone 16 Pro',
+  'iPhone 15 Pro Max',
+  'iPhone 15 Pro',
+  'iPhone 14 Pro Max',
+  'iPhone 14 Pro',
+] as const;
 
 /** Default sale / stock value for each model + storage variant. */
 export const PRICE_BOOK: Record<string, Record<string, number>> = {
@@ -53,6 +68,9 @@ export const PRICE_BOOK: Record<string, Record<string, number>> = {
   'iPhone 16 Plus': { '128 GB': 2300, '256 GB': 2400, '512 GB': 2500 },
   'iPhone 16 Pro': { '128 GB': 3000, '256 GB': 3050, '512 GB': 3150 },
   'iPhone 16 Pro Max': { '128 GB': 3250, '256 GB': 3300, '512 GB': 3400 },
+  'iPhone 17': { '256 GB': 3800, '512 GB': 4100 },
+  'iPhone 17 Pro': { '256 GB': 4800, '512 GB': 5200, '1 TB': 5600 },
+  'iPhone 17 Pro Max': { '256 GB': 5400, '512 GB': 5800, '1 TB': 6200 },
 };
 
 /** Map legacy / alternate spellings onto catalog names. */
@@ -92,10 +110,14 @@ export function defaultListedValue(
   const book = PRICE_BOOK[normalizeModelName(modelName)];
   if (!book) return undefined;
   if (storage in book) return book[storage];
-  // tolerate "256GB" vs "256 GB"
   const compact = storage.replace(/\s+/g, '').toUpperCase();
   for (const [key, value] of Object.entries(book)) {
     if (key.replace(/\s+/g, '').toUpperCase() === compact) return value;
   }
   return undefined;
+}
+
+/** True when the model name is an Apple iPhone (store sells only these). */
+export function isIPhoneModel(modelName: string): boolean {
+  return normalizeModelName(modelName).toLowerCase().startsWith('iphone');
 }

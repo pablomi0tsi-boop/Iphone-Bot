@@ -1,39 +1,95 @@
-import { DEMO_PRODUCTS } from './demoCatalog';
-import { assertPublicProduct } from './mapPhoneToProduct';
+import { STORAGE_KEY } from '../domain/defaults';
+import type { AppState } from '../domain/types';
+import {
+  assertPublicProduct,
+  isPurchasableListing,
+  mapPhoneToProduct,
+} from './mapPhoneToProduct';
+import { SEED_IPHONES } from './seedCatalog';
 import {
   DEFAULT_FILTERS,
+  STORE_CONDITION_OPTIONS,
   type StoreFilters,
   type StoreProduct,
   type StoreSort,
 } from './types';
 
 /**
- * Public catalog access. Today: demo products.
- * Later: fetch in-stock rows from `phones` (or a safe view/RPC) and map via
- * `mapPhoneToProduct` — never select IMEI / purchase_price for the storefront.
+ * Catalog access for the public storefront.
+ *
+ * Priority:
+ * 1. Purchasable iPhones from local warehouse state (STORAGE_KEY) when present
+ * 2. Seed iPhone catalog shaped like mapped `phones` rows
+ *
+ * Later: replace `loadCatalogSource` with a public Supabase select/view on
+ * `phones` that omits imei / purchase_price, then map via `mapPhoneToProduct`.
  */
+function readLocalWarehouseProducts(): StoreProduct[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (!raw) return [];
+    const state = JSON.parse(raw) as AppState;
+    if (!state?.phones?.length || !state?.models?.length) return [];
+    const byId = new Map(state.models.map((m) => [m.id, m.name]));
+    const products: StoreProduct[] = [];
+    for (const phone of state.phones) {
+      const modelName = byId.get(phone.modelId);
+      if (!modelName) continue;
+      const mapped = mapPhoneToProduct(phone, modelName);
+      if (mapped) products.push(mapped);
+    }
+    return products;
+  } catch {
+    return [];
+  }
+}
+
+async function loadCatalogSource(): Promise<StoreProduct[]> {
+  const fromWarehouse = readLocalWarehouseProducts().filter(isPurchasableListing);
+  if (fromWarehouse.length > 0) {
+    for (const p of fromWarehouse) assertPublicProduct(p);
+    return fromWarehouse;
+  }
+  const seed = SEED_IPHONES.filter(isPurchasableListing).map((p) => ({ ...p }));
+  for (const p of seed) assertPublicProduct(p);
+  return seed;
+}
+
+async function loadAllKnownProducts(): Promise<StoreProduct[]> {
+  const fromWarehouse = readLocalWarehouseProducts();
+  if (fromWarehouse.length > 0) {
+    for (const p of fromWarehouse) assertPublicProduct(p);
+    return fromWarehouse;
+  }
+  return SEED_IPHONES.map((p) => ({ ...p }));
+}
+
 export async function listStoreProducts(): Promise<StoreProduct[]> {
-  const products = DEMO_PRODUCTS.map((p) => ({ ...p }));
-  for (const product of products) assertPublicProduct(product);
-  return products;
+  return loadCatalogSource();
 }
 
 export async function getStoreProduct(
   id: string,
 ): Promise<StoreProduct | null> {
-  const products = await listStoreProducts();
-  const found = products.find((p) => p.id === id) ?? null;
+  const all = await loadAllKnownProducts();
+  const found = all.find((p) => p.id === id) ?? null;
   if (found) assertPublicProduct(found);
   return found;
 }
 
-export async function listFeaturedProducts(
-  limit = 4,
+export async function listFeaturedByModels(
+  modelNames: readonly string[],
 ): Promise<StoreProduct[]> {
   const products = await listStoreProducts();
-  return [...products]
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-    .slice(0, limit);
+  const picked: StoreProduct[] = [];
+  for (const name of modelNames) {
+    const match = products.find((p) => p.modelName === name);
+    if (match) picked.push(match);
+  }
+  if (picked.length >= 4) return picked;
+  const rest = products.filter((p) => !picked.some((x) => x.id === p.id));
+  return [...picked, ...rest].slice(0, 8);
 }
 
 function matchesQuery(product: StoreProduct, query: string): boolean {
@@ -41,8 +97,8 @@ function matchesQuery(product: StoreProduct, query: string): boolean {
   const hay = [
     product.modelName,
     product.storage,
-    product.color ?? '',
-    product.brand,
+    product.color,
+    product.productNumber,
     product.description,
   ]
     .join(' ')
@@ -54,25 +110,27 @@ function matchesQuery(product: StoreProduct, query: string): boolean {
     .every((token) => hay.includes(token));
 }
 
-export function filterAndSortProducts(
-  products: StoreProduct[],
-  filters: StoreFilters = DEFAULT_FILTERS,
-): StoreProduct[] {
-  let next = products.filter((p) => {
-    if (!matchesQuery(p, filters.query)) return false;
-    if (filters.brand !== 'all' && p.brand !== filters.brand) return false;
-    if (filters.model !== 'all' && p.modelName !== filters.model) return false;
-    if (filters.storage !== 'all' && p.storage !== filters.storage) return false;
-    if (filters.condition !== 'all' && p.condition !== filters.condition) {
-      return false;
-    }
-    if (p.batteryPercent < filters.batteryMin) return false;
-    if (p.price < filters.priceMin || p.price > filters.priceMax) return false;
-    return true;
+function conditionAllowed(
+  product: StoreProduct,
+  filters: StoreFilters,
+): boolean {
+  if (filters.conditions.length === 0) return true;
+  return filters.conditions.some((filter) => {
+    const option = STORE_CONDITION_OPTIONS.find((o) => o.value === filter);
+    return option?.mapsTo.includes(product.condition) ?? false;
   });
+}
 
-  next = sortProducts(next, filters.sort);
-  return next;
+function batteryAllowed(product: StoreProduct, filters: StoreFilters): boolean {
+  if (filters.battery === 'any') return true;
+  return product.batteryPercent >= Number(filters.battery);
+}
+
+function dealScore(product: StoreProduct): number {
+  if (!product.compareAtPrice || product.compareAtPrice <= product.price) {
+    return 0;
+  }
+  return (product.compareAtPrice - product.price) / product.compareAtPrice;
 }
 
 export function sortProducts(
@@ -85,23 +143,43 @@ export function sortProducts(
       return copy.sort((a, b) => a.price - b.price);
     case 'price_desc':
       return copy.sort((a, b) => b.price - a.price);
+    case 'best_deal':
+      return copy.sort(
+        (a, b) => dealScore(b) - dealScore(a) || a.price - b.price,
+      );
     case 'newest':
     default:
       return copy.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 }
 
-export function uniqueModels(products: StoreProduct[]): string[] {
-  return [...new Set(products.map((p) => p.modelName))].sort((a, b) =>
-    a.localeCompare(b, 'pl'),
-  );
+export function filterAndSortProducts(
+  products: StoreProduct[],
+  filters: StoreFilters = DEFAULT_FILTERS,
+): StoreProduct[] {
+  const max =
+    filters.priceMax > 0 ? filters.priceMax : Number.POSITIVE_INFINITY;
+  const filtered = products.filter((p) => {
+    if (!matchesQuery(p, filters.query)) return false;
+    if (filters.models.length && !filters.models.includes(p.modelName)) {
+      return false;
+    }
+    if (filters.storages.length && !filters.storages.includes(p.storage)) {
+      return false;
+    }
+    if (!conditionAllowed(p, filters)) return false;
+    if (!batteryAllowed(p, filters)) return false;
+    if (p.price < filters.priceMin || p.price > max) return false;
+    if (filters.colors.length && !filters.colors.includes(p.color)) {
+      return false;
+    }
+    return true;
+  });
+  return sortProducts(filtered, filters.sort);
 }
 
-export function uniqueStorages(products: StoreProduct[]): string[] {
-  return [...new Set(products.map((p) => p.storage))].sort((a, b) => {
-    const na = parseInt(a, 10);
-    const nb = parseInt(b, 10);
-    if (!Number.isNaN(na) && !Number.isNaN(nb)) return na - nb;
-    return a.localeCompare(b, 'pl');
-  });
+export function uniqueColors(products: StoreProduct[]): string[] {
+  return [
+    ...new Set(products.map((p) => p.color).filter(Boolean)),
+  ].sort((a, b) => a.localeCompare(b, 'pl'));
 }

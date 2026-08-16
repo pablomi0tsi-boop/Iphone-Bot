@@ -24,7 +24,7 @@ interface AuthContextValue {
   error: string | null;
   /** When false, cloud auth is skipped (localStorage fallback). */
   cloudAuthRequired: boolean;
-  signInWithGitHub: () => Promise<void>;
+  signInWithGitHub: (redirectPath?: string) => Promise<void>;
   signOut: () => Promise<void>;
   clearError: () => void;
 }
@@ -94,10 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [cloudAuthRequired]);
 
-  const signInWithGitHub = useCallback(async () => {
+  const signInWithGitHub = useCallback(async (redirectPath = '/magazyn') => {
     setError(null);
     try {
-      await oauthSignInWithGitHub();
+      await oauthSignInWithGitHub(redirectPath);
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Nie udało się rozpocząć logowania.',

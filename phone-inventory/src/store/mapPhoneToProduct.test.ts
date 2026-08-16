@@ -1,18 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import type { Phone } from '../domain/types';
-import { assertPublicProduct, mapPhoneToProduct } from './mapPhoneToProduct';
+import {
+  assertPublicProduct,
+  encodeStoreMeta,
+  isPurchasableListing,
+  mapPhoneToProduct,
+  parseStoreMeta,
+} from './mapPhoneToProduct';
 import { filterAndSortProducts } from './catalog';
-import { DEMO_PRODUCTS } from './demoCatalog';
+import { SEED_IPHONES } from './seedCatalog';
 
 function samplePhone(overrides: Partial<Phone> = {}): Phone {
   return {
-    id: 'phone-1',
+    id: '11111111-2222-3333-4444-555555555555',
     modelId: 'iphone-15',
     storage: '128 GB',
     imei: 'SECRET-IMEI-SHOULD-NEVER-LEAK',
     batteryPercent: 91,
     condition: 'dobry',
-    note: 'Czysty egzemplarz',
+    note: encodeStoreMeta('Czysty egzemplarz', {
+      color: 'Blue',
+      listedInStore: true,
+    }),
     purchasePrice: 2000,
     listedValue: 3199,
     status: 'in_stock',
@@ -23,43 +32,83 @@ function samplePhone(overrides: Partial<Phone> = {}): Phone {
 }
 
 describe('mapPhoneToProduct', () => {
-  it('maps stock phone without IMEI or purchase price', () => {
-    const product = mapPhoneToProduct(samplePhone(), 'iPhone 15', {
-      color: 'Niebieski',
-    });
+  it('maps stock iPhone without IMEI or purchase price', () => {
+    const product = mapPhoneToProduct(samplePhone(), 'iPhone 15');
     expect(product).not.toBeNull();
-    expect(product!.id).toBe('phone-1');
     expect(product!.price).toBe(3199);
-    expect(product!.color).toBe('Niebieski');
+    expect(product!.color).toBe('Blue');
+    expect(product!.listedInStore).toBe(true);
     expect(product).not.toHaveProperty('imei');
     expect(product).not.toHaveProperty('purchasePrice');
     assertPublicProduct(product!);
+    expect(isPurchasableListing(product!)).toBe(true);
   });
 
-  it('skips sold / zero-price phones', () => {
+  it('hides non-listed and sold phones from catalog', () => {
+    const hidden = mapPhoneToProduct(
+      samplePhone({
+        note: encodeStoreMeta('', { listedInStore: false }),
+      }),
+      'iPhone 15',
+    );
+    expect(hidden).not.toBeNull();
+    expect(isPurchasableListing(hidden!)).toBe(false);
+
+    const sold = mapPhoneToProduct(samplePhone({ status: 'sold' }), 'iPhone 15');
+    expect(sold?.listingStatus).toBe('sold');
+    expect(isPurchasableListing(sold!)).toBe(false);
+
     expect(
-      mapPhoneToProduct(samplePhone({ status: 'sold' }), 'iPhone 15'),
+      mapPhoneToProduct(samplePhone({ status: 'removed' }), 'iPhone 15'),
     ).toBeNull();
-    expect(
-      mapPhoneToProduct(samplePhone({ listedValue: 0 }), 'iPhone 15'),
-    ).toBeNull();
+  });
+
+  it('rejects non-iPhone models', () => {
+    expect(mapPhoneToProduct(samplePhone(), 'Samsung Galaxy S24')).toBeNull();
+  });
+
+  it('round-trips store meta in note', () => {
+    const encoded = encodeStoreMeta('hello', {
+      color: 'Natural Titanium',
+      listedInStore: true,
+    });
+    const { cleanNote, meta } = parseStoreMeta(encoded);
+    expect(cleanNote).toBe('hello');
+    expect(meta.color).toBe('Natural Titanium');
+    expect(meta.listedInStore).toBe(true);
   });
 });
 
 describe('filterAndSortProducts', () => {
-  it('filters by brand and sorts by price', () => {
-    const apple = filterAndSortProducts(DEMO_PRODUCTS, {
+  it('filters iPhone seed catalog by model and sorts by price', () => {
+    const filtered = filterAndSortProducts(SEED_IPHONES, {
       query: '',
-      brand: 'Apple',
-      model: 'all',
-      storage: 'all',
-      condition: 'all',
-      batteryMin: 0,
+      models: ['iPhone 15 Pro'],
+      storages: [],
+      conditions: [],
+      battery: 'any',
       priceMin: 0,
-      priceMax: 100_000,
+      priceMax: 0,
+      colors: [],
       sort: 'price_asc',
     });
-    expect(apple.every((p) => p.brand === 'Apple')).toBe(true);
-    expect(apple[0].price).toBeLessThanOrEqual(apple[apple.length - 1].price);
+    expect(filtered.length).toBeGreaterThan(0);
+    expect(filtered.every((p) => p.modelName === 'iPhone 15 Pro')).toBe(true);
+  });
+
+  it('searches by product number', () => {
+    const filtered = filterAndSortProducts(SEED_IPHONES, {
+      query: 'SF-15P-256-02',
+      models: [],
+      storages: [],
+      conditions: [],
+      battery: 'any',
+      priceMin: 0,
+      priceMax: 0,
+      colors: [],
+      sort: 'newest',
+    });
+    expect(filtered).toHaveLength(1);
+    expect(filtered[0].modelName).toBe('iPhone 15 Pro');
   });
 });
