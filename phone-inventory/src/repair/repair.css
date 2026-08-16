@@ -1,0 +1,968 @@
+/* Repair iPhone module — SmartFix dark + green */
+
+.repair-page {
+  padding-bottom: 4rem;
+}
+
+.repair-kicker {
+  margin: 0 0 0.5rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.repair-muted {
+  color: var(--text-muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.repair-hero {
+  position: relative;
+  overflow: hidden;
+  padding: 3.5rem 1.25rem 3rem;
+  border-bottom: 1px solid var(--border);
+  background:
+    radial-gradient(ellipse 70% 80% at 15% 0%, rgba(61, 220, 151, 0.14), transparent 55%),
+    radial-gradient(ellipse 50% 60% at 90% 20%, rgba(61, 220, 151, 0.06), transparent 50%),
+    linear-gradient(180deg, #0a0f0c 0%, var(--bg) 100%);
+}
+
+.repair-hero__glow {
+  pointer-events: none;
+  position: absolute;
+  inset: auto -20% -40% 40%;
+  height: 60%;
+  background: radial-gradient(circle, rgba(61, 220, 151, 0.12), transparent 65%);
+}
+
+.repair-hero__inner {
+  position: relative;
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.repair-hero h1 {
+  margin: 0 0 0.75rem;
+  font-family: 'Syne', 'DM Sans', sans-serif;
+  font-size: clamp(1.85rem, 4.5vw, 2.75rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+.repair-hero__lead {
+  margin: 0 auto 1.5rem;
+  max-width: 36rem;
+  font-size: 1.05rem;
+  line-height: 1.55;
+  color: var(--text-muted);
+}
+
+.repair-benefits {
+  list-style: none;
+  margin: 0 auto 1.75rem;
+  padding: 0;
+  display: grid;
+  gap: 0.55rem;
+  max-width: 28rem;
+  text-align: left;
+}
+
+.repair-benefits li {
+  position: relative;
+  padding-left: 1.6rem;
+  font-size: 0.95rem;
+  color: var(--text);
+  line-height: 1.4;
+}
+
+.repair-benefits li::before {
+  content: '✓';
+  position: absolute;
+  left: 0;
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.repair-page__body {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2rem 1.25rem 1rem;
+  scroll-margin-top: 5rem;
+}
+
+.repair-page .btn {
+  border: 0;
+  border-radius: 14px;
+  padding: 12px 18px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  transition: transform 0.12s ease, background 0.12s ease, filter 0.12s ease;
+  cursor: pointer;
+  font: inherit;
+}
+
+.repair-page .btn:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.repair-page .btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.repair-page .btn.primary {
+  background: var(--accent);
+  color: #04140d;
+}
+
+.repair-page .btn.primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.repair-page .btn.ghost {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.repair-page .btn.lg {
+  padding: 0.9rem 1.6rem;
+  font-size: 1rem;
+}
+
+.repair-cta-hint {
+  text-align: center;
+  padding: 2.5rem 1.5rem;
+  border-radius: 1.25rem;
+  border: 1px dashed rgba(61, 220, 151, 0.35);
+  background: rgba(61, 220, 151, 0.04);
+  color: var(--text-muted);
+  display: grid;
+  gap: 1rem;
+  justify-items: center;
+}
+
+/* —— Panel —— */
+
+.repair-panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 1.25rem;
+  padding: 1.5rem 1.35rem 1.35rem;
+  box-shadow: var(--shadow);
+  scroll-margin-top: 5.5rem;
+}
+
+@media (min-width: 768px) {
+  .repair-panel {
+    padding: 2rem 2.25rem 1.75rem;
+  }
+}
+
+.repair-progress {
+  margin-bottom: 1.5rem;
+}
+
+.repair-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1rem;
+  margin-bottom: 0.55rem;
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.repair-progress-meta span:last-child {
+  color: var(--accent);
+}
+
+.repair-progress-bar {
+  height: 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+  overflow: hidden;
+}
+
+.repair-progress-bar > span {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1faa6c, var(--accent));
+  transition: width 0.35s ease;
+}
+
+.repair-step {
+  animation: repair-step-in 0.32s ease;
+}
+
+.repair-step h2 {
+  margin: 0 0 0.4rem;
+  font-size: clamp(1.25rem, 2.5vw, 1.55rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.repair-step > .repair-muted {
+  margin: 0 0 1.35rem;
+}
+
+@keyframes repair-step-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.repair-error {
+  margin: 0.75rem 0;
+  padding: 0.65rem 0.85rem;
+  border-radius: 0.65rem;
+  background: var(--danger-dim);
+  border: 1px solid rgba(255, 107, 122, 0.35);
+  color: #ffb0b8;
+  font-size: 0.88rem;
+}
+
+.repair-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 1.35rem;
+}
+
+.repair-nav {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1.75rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+/* —— Model —— */
+
+.repair-model-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+@media (min-width: 560px) {
+  .repair-model-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 840px) {
+  .repair-model-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+.repair-model-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.55rem;
+  padding: 0.85rem 0.65rem 0.95rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-align: center;
+}
+
+.repair-model-card img {
+  width: 72px;
+  height: 72px;
+  object-fit: contain;
+  filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35));
+}
+
+.repair-model-fallback {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+
+.repair-model-card:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+  background: rgba(61, 220, 151, 0.06);
+}
+
+.repair-model-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 220, 151, 0.25);
+}
+
+/* —— Issues —— */
+
+.repair-issue-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.65rem;
+}
+
+@media (min-width: 560px) {
+  .repair-issue-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 840px) {
+  .repair-issue-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.repair-issue-card {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  text-align: left;
+  padding: 1rem 1.05rem;
+  min-height: 4.25rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.repair-issue-emoji {
+  font-size: 1.35rem;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+.repair-issue-card strong {
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
+.repair-issue-card:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+  background: rgba(61, 220, 151, 0.06);
+}
+
+.repair-issue-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 220, 151, 0.25);
+}
+
+/* —— Description / upload —— */
+
+.repair-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin: 1rem 0;
+}
+
+.repair-field > span {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.repair-field input,
+.repair-field textarea {
+  padding: 0.75rem 0.9rem;
+  border-radius: 0.7rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.28);
+  color: var(--text);
+  resize: vertical;
+}
+
+.repair-field input:focus,
+.repair-field textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(61, 220, 151, 0.15);
+}
+
+.repair-upload-hint {
+  margin: 0 0 0.75rem;
+}
+
+.repair-upload {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+  align-items: flex-start;
+}
+
+.repair-photo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.repair-photo-list li {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  border-radius: 0.65rem;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+.repair-photo-list img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.repair-photo-remove {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 1rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* —— Damage / delivery cards —— */
+
+.repair-check-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.55rem;
+}
+
+@media (min-width: 560px) {
+  .repair-check-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.repair-check-card {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  text-align: left;
+  padding: 0.95rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.repair-check-card > span {
+  color: var(--text-muted);
+  font-weight: 700;
+}
+
+.repair-check-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+}
+
+.repair-check-card.on > span {
+  color: var(--accent);
+}
+
+.repair-condition-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.7rem;
+}
+
+@media (min-width: 640px) {
+  .repair-condition-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.repair-condition-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  text-align: left;
+  padding: 1.15rem;
+  min-height: 5rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  transition: border-color 0.15s, background 0.15s, box-shadow 0.15s;
+}
+
+.repair-condition-card strong {
+  font-size: 1rem;
+}
+
+.repair-condition-card span {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+}
+
+.repair-condition-card:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+}
+
+.repair-condition-card.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.12);
+  box-shadow: 0 0 0 1px rgba(61, 220, 151, 0.25);
+}
+
+.repair-delivery-note {
+  margin: 1rem 0 0;
+  padding: 0.85rem 1rem;
+  border-radius: 0.75rem;
+  background: rgba(61, 220, 151, 0.08);
+  border: 1px solid rgba(61, 220, 151, 0.25);
+  color: var(--text);
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+/* —— Power / chips —— */
+
+.repair-seg {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin: 0.85rem 0 0.25rem;
+}
+
+.repair-seg button {
+  padding: 0.55rem 1rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.repair-seg button:hover {
+  border-color: rgba(61, 220, 151, 0.4);
+}
+
+.repair-seg button.on {
+  border-color: var(--accent);
+  background: rgba(61, 220, 151, 0.15);
+  color: #bbf7d0;
+}
+
+.repair-followup {
+  margin-top: 1.35rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.repair-followup h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+/* —— Estimate —— */
+
+.repair-estimate {
+  text-align: center;
+}
+
+.repair-estimate-price {
+  margin: 0.75rem 0;
+  font-size: clamp(2rem, 5vw, 2.85rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  color: var(--accent);
+  line-height: 1.15;
+}
+
+.repair-estimate-price--soft {
+  font-size: clamp(1.15rem, 3vw, 1.45rem);
+  color: var(--text);
+}
+
+.repair-estimate-price.sm {
+  font-size: 1.35rem;
+  margin: 0;
+}
+
+.repair-summary-list {
+  list-style: none;
+  margin: 1.25rem auto;
+  padding: 1rem 1.15rem;
+  max-width: 26rem;
+  text-align: left;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.22);
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.repair-summary-list.tight {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  max-width: none;
+}
+
+.repair-estimate .repair-actions {
+  justify-content: center;
+}
+
+/* —— Contact —— */
+
+.repair-form-grid {
+  display: grid;
+  gap: 1rem;
+  margin: 1.25rem 0;
+}
+
+@media (min-width: 560px) {
+  .repair-form-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+.repair-pref {
+  margin: 0 0 1rem;
+  padding: 0;
+  border: 0;
+}
+
+.repair-pref legend {
+  margin-bottom: 0.35rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.repair-check {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.65rem;
+  font-size: 0.88rem;
+  color: var(--text);
+  cursor: pointer;
+  line-height: 1.4;
+  margin: 0.25rem 0;
+}
+
+.repair-check input {
+  margin-top: 0.2rem;
+  accent-color: var(--accent);
+}
+
+.repair-check a {
+  color: var(--accent);
+}
+
+/* —— Review / success —— */
+
+.repair-review-grid {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1.25rem 0;
+}
+
+@media (min-width: 640px) {
+  .repair-review-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.repair-review-grid section {
+  padding: 1rem 1.1rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.repair-review-grid h3 {
+  margin: 0 0 0.55rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.repair-review-grid p {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.repair-span-2 {
+  grid-column: 1 / -1;
+}
+
+.repair-success {
+  text-align: center;
+  padding: 1.5rem 0.5rem 0.5rem;
+}
+
+.repair-success h2 {
+  margin: 0.5rem 0;
+  font-size: 1.45rem;
+  font-weight: 800;
+}
+
+.repair-ref {
+  display: inline-block;
+  margin: 0.5rem 0 1.5rem;
+  padding: 0.75rem 1.25rem;
+  border-radius: 0.75rem;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid var(--border);
+  font-size: 0.9rem;
+  color: var(--text-muted);
+}
+
+.repair-ref strong {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 1.35rem;
+  color: var(--accent);
+  letter-spacing: 0.04em;
+}
+
+.repair-success .repair-actions {
+  justify-content: center;
+}
+
+/* —— Page sections —— */
+
+.repair-section {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 3rem 1.25rem 1rem;
+}
+
+.repair-section__head {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.repair-section__head h2 {
+  margin: 0 0 0.5rem;
+  font-family: 'Syne', 'DM Sans', sans-serif;
+  font-size: clamp(1.4rem, 3vw, 1.85rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.repair-section__head > p:last-child {
+  margin: 0 auto;
+  max-width: 32rem;
+  color: var(--text-muted);
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+
+.repair-how {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .repair-how {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .repair-how {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 1100px) {
+  .repair-how {
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+  }
+}
+
+.repair-how__card {
+  padding: 1.25rem 1.1rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  transition: border-color 0.2s, transform 0.2s;
+}
+
+.repair-how__card:hover {
+  border-color: rgba(61, 220, 151, 0.35);
+  transform: translateY(-2px);
+}
+
+.repair-how__n {
+  display: block;
+  margin-bottom: 0.65rem;
+  font-size: 0.85rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  color: var(--accent);
+}
+
+.repair-how__card h3 {
+  margin: 0 0 0.4rem;
+  font-size: 0.98rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.repair-how__card p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.repair-popular {
+  display: grid;
+  gap: 0.85rem;
+  grid-template-columns: 1fr;
+}
+
+@media (min-width: 640px) {
+  .repair-popular {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (min-width: 960px) {
+  .repair-popular {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+.repair-popular__card {
+  padding: 1.35rem 1.2rem;
+  border-radius: 1rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.repair-popular__card h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.repair-popular__card p {
+  margin: 0;
+  flex: 1;
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  line-height: 1.45;
+}
+
+.repair-popular__card .btn {
+  align-self: flex-start;
+  margin-top: 0.35rem;
+}
+
+.repair-why {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: 1fr;
+  max-width: 720px;
+  margin-inline: auto;
+}
+
+@media (min-width: 560px) {
+  .repair-why {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.repair-why li {
+  position: relative;
+  padding: 1rem 1rem 1rem 2.4rem;
+  border-radius: 0.9rem;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.repair-why li::before {
+  content: '✓';
+  position: absolute;
+  left: 1rem;
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.repair-section--why {
+  padding-bottom: 2rem;
+}

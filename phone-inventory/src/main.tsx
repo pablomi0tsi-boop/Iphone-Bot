@@ -19,6 +19,7 @@ import {
   TermsPage,
 } from './store/pages/ContentPages';
 import { SellPage } from './sell/SellPage';
+import { RepairPage } from './repair/RepairPage';
 import './index.css';
 
 createRoot(document.getElementById('root')!).render(
@@ -36,6 +37,7 @@ createRoot(document.getElementById('root')!).render(
                 <Route path="sklep/:id" element={<ProductPage />} />
                 <Route path="iphone" element={<ShopPage />} />
                 <Route path="sprzedaj" element={<SellPage />} />
+                <Route path="napraw" element={<RepairPage />} />
                 <Route path="koszyk" element={<CartPage />} />
                 <Route path="zamowienie" element={<CheckoutPage />} />
                 <Route path="konto" element={<AccountPage />} />

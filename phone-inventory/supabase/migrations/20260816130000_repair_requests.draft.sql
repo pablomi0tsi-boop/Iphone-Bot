@@ -1,0 +1,44 @@
+-- =============================================================================
+-- OPTIONAL future migration — do NOT apply until approved.
+-- Public repair submissions (`repair_requests`).
+-- Source of truth for app fields: phone-inventory/src/repair/types.ts
+-- =============================================================================
+
+-- create table if not exists public.repair_requests (
+--   id uuid primary key default gen_random_uuid(),
+--   created_at timestamptz not null default now(),
+--   user_id uuid references auth.users (id) on delete set null,
+--   request_number text not null unique,
+--   model text not null,
+--   issues jsonb not null default '[]'::jsonb,
+--   description text not null default '',
+--   additional_damage jsonb not null default '[]'::jsonb,
+--   phone_turns_on text not null
+--     check (phone_turns_on in ('yes', 'no', 'unknown')),
+--   charger_reaction text
+--     check (charger_reaction is null or charger_reaction in ('yes', 'no', 'unknown')),
+--   delivery_method text not null
+--     check (delivery_method in ('in_person', 'courier')),
+--   estimated_price_from numeric(12, 2),
+--   estimated_price_to numeric(12, 2),
+--   estimated_price_label text not null default '',
+--   customer_name text not null,
+--   customer_email text not null,
+--   customer_phone text not null,
+--   preferred_contact text not null
+--     check (preferred_contact in ('phone', 'sms', 'email')),
+--   photo_names jsonb not null default '[]'::jsonb,
+--   status text not null default 'new'
+--     check (status in (
+--       'new', 'contacted', 'accepted', 'in_service', 'diagnosing',
+--       'repairing', 'ready', 'completed', 'cancelled'
+--     ))
+-- );
+--
+-- create index if not exists repair_requests_created_at_idx
+--   on public.repair_requests (created_at desc);
+-- create index if not exists repair_requests_status_idx
+--   on public.repair_requests (status);
+--
+-- alter table public.repair_requests enable row level security;
+-- -- Add RLS policies when enabling (public insert + staff read).
