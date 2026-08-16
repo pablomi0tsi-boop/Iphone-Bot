@@ -1,6 +1,7 @@
 import type { Phone, PhoneCondition, PhoneStatus } from '../domain/types';
 import { PHONE_CONDITIONS } from '../domain/types';
 import { isIPhoneModel } from '../domain/catalog';
+import { defaultImagesForModel } from './productImages';
 import type { StoreListingStatus, StoreProduct } from './types';
 
 /** Optional storefront meta encoded in warehouse `note` (no schema change). */
@@ -98,7 +99,7 @@ export function mapPhoneToProduct(
     description,
     listingStatus: listing,
     listedInStore,
-    images: [],
+    images: defaultImagesForModel(modelName),
     createdAt: phone.createdAt,
   };
 }

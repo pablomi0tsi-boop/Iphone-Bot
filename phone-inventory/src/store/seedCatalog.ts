@@ -1,4 +1,5 @@
 import { modelIdFromName } from '../domain/catalog';
+import { defaultImagesForModel } from './productImages';
 import type { StoreProduct } from './types';
 
 /**
@@ -7,15 +8,21 @@ import type { StoreProduct } from './types';
  * without IMEI / purchase_price. Replace by swapping `loadCatalogSource()`.
  */
 function unit(
-  partial: Omit<StoreProduct, 'warrantyMonths' | 'listedInStore' | 'isSeed'> & {
+  partial: Omit<StoreProduct, 'warrantyMonths' | 'listedInStore' | 'isSeed' | 'images'> & {
     warrantyMonths?: number;
+    images?: string[];
   },
 ): StoreProduct {
+  const images =
+    partial.images && partial.images.length > 0
+      ? partial.images
+      : defaultImagesForModel(partial.modelName);
   return {
     warrantyMonths: 12,
     listedInStore: partial.listingStatus === 'available',
     isSeed: true,
     ...partial,
+    images,
   };
 }
 

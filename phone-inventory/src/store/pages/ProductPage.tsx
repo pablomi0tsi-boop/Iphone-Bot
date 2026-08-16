@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useCart } from '../CartContext';
 import { getStoreProduct } from '../catalog';
-import { ProductVisual } from '../components/ProductVisual';
 import { EmptyState, ErrorState, LoadingState } from '../components/States';
 import {
   availabilityLabel,
@@ -78,9 +77,10 @@ export function ProductPage() {
   }
 
   const available = product.listingStatus === 'available';
-  const gallery = product.images.length
-    ? product.images
-    : ['visual-0', 'visual-1', 'visual-2'];
+  const gallery =
+    product.images.length > 0
+      ? product.images
+      : [`/products/iphone-15.webp`];
 
   return (
     <main className="sf-page sf-product-page">
@@ -90,20 +90,28 @@ export function ProductPage() {
 
       <div className="sf-product-layout">
         <div>
-          <ProductVisual product={product} large />
-          <div className="sf-gallery-thumbs" role="tablist" aria-label="Galeria">
-            {gallery.map((src, index) => (
-              <button
-                key={src}
-                type="button"
-                className={index === activeImage ? 'active' : ''}
-                aria-label={`Zdjęcie ${index + 1}`}
-                onClick={() => setActiveImage(index)}
-              >
-                <span className="sf-thumb-dot" />
-              </button>
-            ))}
+          <div className="sf-product-gallery">
+            <img
+              src={gallery[Math.min(activeImage, gallery.length - 1)]}
+              alt={`${product.modelName} — zdjęcie katalogowe`}
+              className="sf-product-gallery-img"
+            />
           </div>
+          {gallery.length > 1 ? (
+            <div className="sf-gallery-thumbs" role="tablist" aria-label="Galeria">
+              {gallery.map((src, index) => (
+                <button
+                  key={src}
+                  type="button"
+                  className={index === activeImage ? 'active' : ''}
+                  aria-label={`Zdjęcie ${index + 1}`}
+                  onClick={() => setActiveImage(index)}
+                >
+                  <img src={src} alt="" />
+                </button>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="sf-product-info">
